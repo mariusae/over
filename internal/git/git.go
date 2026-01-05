@@ -279,3 +279,22 @@ type LogEntry struct {
 	Date        time.Time
 	Subject     string
 }
+
+// ShowFile resets a file to the content from a specific commit.
+func ShowFile(repoPath, sha, filePath, outputPath string) error {
+	// Use git show to get file content at specific commit
+	cmd := exec.Command("git", "show", fmt.Sprintf("%s:%s", sha, filePath))
+	cmd.Dir = repoPath
+
+	content, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get file content from commit %s: %w", sha, err)
+	}
+
+	// Write content to output file
+	if err := os.WriteFile(outputPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
+}

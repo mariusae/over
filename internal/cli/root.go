@@ -36,4 +36,5 @@ func init() {
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(lsCmd)
 	rootCmd.AddCommand(rmCmd)
+	rootCmd.AddCommand(resetCmd)
 }
