@@ -76,8 +76,23 @@ func runUnlink(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
 
+	// Add negative pattern to linklist
+	registry, err := overlay.LoadRegistry(targetOverlay.TargetDir)
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+
+	ov := registry.FindOverlay(targetOverlay.Name)
+	if ov != nil {
+		ov.LinkList = overlay.AddNegativePattern(ov.LinkList, relPath)
+		if err := overlay.SaveRegistry(targetOverlay.TargetDir, registry); err != nil {
+			return fmt.Errorf("failed to save registry: %w", err)
+		}
+	}
+
 	fmt.Printf("Unlinked: %s\n", relPath)
-	fmt.Println("The file now has its own inode and will not be updated during sync.")
+	fmt.Println("The file now has its own inode and will not be linked during future operations.")
+	fmt.Printf("Added exclusion pattern to linklist: !%s\n", relPath)
 
 	return nil
 }

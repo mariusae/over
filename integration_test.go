@@ -105,7 +105,7 @@ func TestIntegrationCloneAndStatus(t *testing.T) {
 	defer os.RemoveAll(filepath.Join(targetDir, ".tmp-repo"))
 
 	// Create hardlinks
-	manifest, err := overlay.CreateHardlinks(filepath.Join(targetDir, ".tmp-repo"), targetDir)
+	manifest, err := overlay.CreateHardlinks(filepath.Join(targetDir, ".tmp-repo"), targetDir, overlay.DefaultLinkList())
 	if err != nil {
 		t.Fatalf("Failed to create hardlinks: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestIntegrationConflictDetection(t *testing.T) {
 	defer os.RemoveAll(tmpRepoPath)
 
 	// Check for conflicts
-	conflicts, err := overlay.CheckConflicts(tmpRepoPath, targetDir)
+	conflicts, err := overlay.CheckConflicts(tmpRepoPath, targetDir, overlay.DefaultLinkList())
 	if err != nil {
 		t.Fatalf("Failed to check conflicts: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestIntegrationHardlinkSync(t *testing.T) {
 	}
 
 	// Create hardlinks
-	if _, err := overlay.CreateHardlinks(tmpRepoPath, targetDir); err != nil {
+	if _, err := overlay.CreateHardlinks(tmpRepoPath, targetDir, overlay.DefaultLinkList()); err != nil {
 		t.Fatalf("Failed to create hardlinks: %v", err)
 	}
 
@@ -450,6 +450,7 @@ func TestIntegrationHardlinkSync(t *testing.T) {
 	ov := overlay.Overlay{
 		RepoPath:  tmpRepoPath,
 		TargetDir: targetDir,
+		LinkList:  overlay.DefaultLinkList(), // Link all files
 	}
 
 	if err := overlay.SyncHardlinks(ov, nil, filesBefore, filesAfter); err != nil {
@@ -491,7 +492,7 @@ func TestIntegrationBrokenHardlinks(t *testing.T) {
 	os.WriteFile(repoFile, []byte("content"), 0644)
 
 	// Create manifest by hardlinking
-	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir, overlay.DefaultLinkList())
 
 	ov := overlay.Overlay{
 		RepoPath:  repoDir,
@@ -539,7 +540,7 @@ func TestIntegrationUnlinkFile(t *testing.T) {
 	os.WriteFile(repoFile, []byte("original content"), 0644)
 
 	// Create manifest by hardlinking
-	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir, overlay.DefaultLinkList())
 
 	ov := overlay.Overlay{
 		Name:      "test-overlay",
@@ -614,7 +615,7 @@ func TestIntegrationRelinkFile(t *testing.T) {
 	os.WriteFile(repoFile, []byte("repo content"), 0644)
 
 	// Create manifest by hardlinking
-	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir, overlay.DefaultLinkList())
 
 	ov := overlay.Overlay{
 		Name:      "test-overlay",
@@ -705,7 +706,7 @@ func TestIntegrationSyncWithUnlinkedFiles(t *testing.T) {
 	}
 
 	// Create hardlinks
-	manifest, err := overlay.CreateHardlinks(tmpRepoPath, targetDir)
+	manifest, err := overlay.CreateHardlinks(tmpRepoPath, targetDir, overlay.DefaultLinkList())
 	if err != nil {
 		t.Fatalf("Failed to create hardlinks: %v", err)
 	}
@@ -786,7 +787,7 @@ func TestIntegrationCheckBrokenHardlinksSkipsUnlinked(t *testing.T) {
 	os.WriteFile(filepath.Join(repoDir, "unlinked.txt"), []byte("content"), 0644)
 
 	// Create manifest by hardlinking
-	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir, overlay.DefaultLinkList())
 
 	ov := overlay.Overlay{
 		Name:      "test-overlay",

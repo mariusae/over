@@ -12,6 +12,7 @@ import (
 )
 
 var overwriteMode string
+var linkAll bool
 
 var cloneCmd = &cobra.Command{
 	Use:   "clone [name] <giturl>",
@@ -23,6 +24,9 @@ to the current directory.
 
 If no name is provided, it defaults to the layer name from the URL.
 
+By default, no files are linked when cloning. Use -l to install a default
+linklist (all files) and link all files.
+
 Use -o to handle file conflicts:
   -o=theirs  Overwrite local files with layer versions
   -o=ours    Keep local files, skip conflicting layer files`,
@@ -32,6 +36,7 @@ Use -o to handle file conflicts:
 
 func init() {
 	cloneCmd.Flags().StringVarP(&overwriteMode, "overwrite", "o", "", "Conflict resolution: 'theirs' (use repo) or 'ours' (keep local)")
+	cloneCmd.Flags().BoolVarP(&linkAll, "link", "l", false, "Install default linklist and link all files")
 }
 
 func runClone(cmd *cobra.Command, args []string) error {
@@ -86,8 +91,18 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to clone repository: %w", err)
 	}
 
-	// Check for file conflicts
-	conflicts, err := overlay.CheckConflicts(repoPath, cwd)
+	// Determine linklist based on -l flag
+	var linkList []string
+	if linkAll {
+		linkList = overlay.DefaultLinkList()
+		fmt.Println("Installing default linklist (all files)...")
+	} else {
+		linkList = []string{} // Empty linklist means no files linked
+		fmt.Println("No linklist installed (files not linked). Use 'over edit' to configure.")
+	}
+
+	// Check for file conflicts (only for files that will be linked)
+	conflicts, err := overlay.CheckConflicts(repoPath, cwd, linkList)
 	if err != nil {
 		os.RemoveAll(repoPath)
 		return fmt.Errorf("failed to check for conflicts: %w", err)
@@ -114,18 +129,22 @@ func runClone(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	fmt.Println("Creating hardlinks...")
-
 	// Create hardlinks with conflict handling
 	var manifest *overlay.Manifest
-	if overwriteMode == "ours" {
-		manifest, err = overlay.CreateHardlinksKeepLocal(repoPath, cwd, conflicts)
+	if linkAll {
+		fmt.Println("Creating hardlinks...")
+		if overwriteMode == "ours" {
+			manifest, err = overlay.CreateHardlinksKeepLocal(repoPath, cwd, linkList, conflicts)
+		} else {
+			manifest, err = overlay.CreateHardlinks(repoPath, cwd, linkList)
+		}
+		if err != nil {
+			os.RemoveAll(repoPath)
+			return fmt.Errorf("failed to create hardlinks: %w", err)
+		}
 	} else {
-		manifest, err = overlay.CreateHardlinks(repoPath, cwd)
-	}
-	if err != nil {
-		os.RemoveAll(repoPath)
-		return fmt.Errorf("failed to create hardlinks: %w", err)
+		// No files linked, create empty manifest
+		manifest = &overlay.Manifest{Version: 1, Files: []overlay.FileEntry{}}
 	}
 
 	// Save metadata
@@ -135,6 +154,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		RepoPath:    repoPath,
 		TargetDir:   cwd,
 		InstalledAt: time.Now(),
+		LinkList:    linkList,
 	}
 
 	// Load existing registry and add this overlay
@@ -152,6 +172,10 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("Layer %q installed successfully (%d files)\n", repoName, len(manifest.Files))
+	if linkAll {
+		fmt.Printf("Layer %q installed successfully (%d files linked)\n", repoName, len(manifest.Files))
+	} else {
+		fmt.Printf("Layer %q installed successfully (no files linked)\n", repoName)
+	}
 	return nil
 }

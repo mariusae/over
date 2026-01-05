@@ -76,8 +76,8 @@ func TestCheckConflicts(t *testing.T) {
 	// Create conflicting file in target
 	os.WriteFile(filepath.Join(targetDir, "file2.txt"), []byte("existing"), 0644)
 
-	// Check conflicts
-	conflicts, err := CheckConflicts(repoDir, targetDir)
+	// Check conflicts with default linklist (all files)
+	conflicts, err := CheckConflicts(repoDir, targetDir, DefaultLinkList())
 	if err != nil {
 		t.Fatalf("CheckConflicts failed: %v", err)
 	}
@@ -121,8 +121,8 @@ func TestCreateHardlinks(t *testing.T) {
 		}
 	}
 
-	// Create hardlinks
-	manifest, err := CreateHardlinks(repoDir, targetDir)
+	// Create hardlinks with default linklist (all files)
+	manifest, err := CreateHardlinks(repoDir, targetDir, DefaultLinkList())
 	if err != nil {
 		t.Fatalf("CreateHardlinks failed: %v", err)
 	}
@@ -244,6 +244,7 @@ func TestSyncHardlinks(t *testing.T) {
 	overlay := Overlay{
 		RepoPath:  repoDir,
 		TargetDir: targetDir,
+		LinkList:  DefaultLinkList(), // Link all files
 	}
 
 	// Initial files

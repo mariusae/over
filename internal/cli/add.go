@@ -102,6 +102,24 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("git add failed: %w", err)
 	}
 
+	// Update linklist if file is not already covered by existing patterns
+	if !overlay.IsFileIncluded(ov.LinkList, relPath) {
+		// Load registry to update the overlay's linklist
+		registry, err := overlay.LoadRegistry(ov.TargetDir)
+		if err != nil {
+			return fmt.Errorf("failed to load registry: %w", err)
+		}
+
+		targetOverlay := registry.FindOverlay(repoName)
+		if targetOverlay != nil {
+			targetOverlay.LinkList = overlay.AddPattern(targetOverlay.LinkList, relPath)
+			if err := overlay.SaveRegistry(ov.TargetDir, registry); err != nil {
+				return fmt.Errorf("failed to save registry: %w", err)
+			}
+			fmt.Printf("Added pattern to linklist: %s\n", relPath)
+		}
+	}
+
 	fmt.Printf("Added %s to overlay %s\n", relPath, repoName)
 	return nil
 }
