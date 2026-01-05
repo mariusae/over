@@ -61,7 +61,18 @@ func SaveRegistry(targetDir string, registry *Registry) error {
 }
 
 // AddOverlay adds an overlay to the registry.
+// If the overlay's Order is 0, it will be assigned the next available order value.
 func (r *Registry) AddOverlay(overlay Overlay) {
+	if overlay.Order == 0 {
+		// Assign next order value (find max and add 1)
+		maxOrder := -1
+		for _, ov := range r.Overlays {
+			if ov.Order > maxOrder {
+				maxOrder = ov.Order
+			}
+		}
+		overlay.Order = maxOrder + 1
+	}
 	r.Overlays = append(r.Overlays, overlay)
 }
 

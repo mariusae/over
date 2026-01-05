@@ -18,9 +18,12 @@ var (
 
 var lsCmd = &cobra.Command{
 	Use:   "ls",
-	Short: "List all files from overlays",
-	Long: `List all files from overlays reachable from the current directory.
-For each file, displays: file path, repository name, status, and modification time.
+	Short: "List all files from layers",
+	Long: `List all files from layers reachable from the current directory.
+For each file, displays: file path, layer name, status, and modification time.
+
+Files are processed in layer order (lower order = higher precedence).
+When multiple layers contain the same file, only the highest precedence layer is shown.
 
 Status indicators:
   ok          - File is properly hardlinked and unchanged
@@ -56,11 +59,13 @@ func runLs(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(overlays) == 0 {
-		fmt.Println("No overlays found in current directory or parents.")
+		fmt.Println("No layers found in current directory or parents.")
 		return nil
 	}
 
-	// Collect all files from all overlays
+	// Collect all files from all layers
+	// Track which files we've seen to implement layer precedence
+	seenFiles := make(map[string]bool)
 	var files []fileInfo
 
 	for _, ov := range overlays {
@@ -95,6 +100,12 @@ func runLs(cmd *cobra.Command, args []string) error {
 
 		// Process each file
 		for _, entry := range manifest.Files {
+			// Skip if we've already seen this file (higher precedence layer)
+			if seenFiles[entry.RelativePath] {
+				continue
+			}
+			seenFiles[entry.RelativePath] = true
+
 			repoFilePath := filepath.Join(ov.RepoPath, entry.RelativePath)
 			targetFilePath := filepath.Join(ov.TargetDir, entry.RelativePath)
 

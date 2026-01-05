@@ -224,3 +224,112 @@ func TestFindReachableOverlays_EmptyDirectory(t *testing.T) {
 		t.Errorf("Expected 0 overlays in empty directory, got %d", len(overlays))
 	}
 }
+
+func TestLayerOrdering(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "overlay-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create registry with layers in non-sorted order
+	registry := &Registry{
+		Version: 1,
+		Overlays: []Overlay{
+			{Name: "layer3", TargetDir: tmpDir, Order: 3},
+			{Name: "layer1", TargetDir: tmpDir, Order: 1},
+			{Name: "layer2", TargetDir: tmpDir, Order: 2},
+		},
+	}
+	if err := SaveRegistry(tmpDir, registry); err != nil {
+		t.Fatalf("Failed to save registry: %v", err)
+	}
+
+	// Find overlays - should be sorted by order
+	overlays, err := FindReachableOverlays(tmpDir)
+	if err != nil {
+		t.Fatalf("FindReachableOverlays failed: %v", err)
+	}
+
+	if len(overlays) != 3 {
+		t.Fatalf("Expected 3 overlays, got %d", len(overlays))
+	}
+
+	// Verify they're sorted by order (lower values first)
+	if overlays[0].Name != "layer1" || overlays[0].Order != 1 {
+		t.Errorf("Expected first overlay to be layer1 with order 1, got %s with order %d", overlays[0].Name, overlays[0].Order)
+	}
+	if overlays[1].Name != "layer2" || overlays[1].Order != 2 {
+		t.Errorf("Expected second overlay to be layer2 with order 2, got %s with order %d", overlays[1].Name, overlays[1].Order)
+	}
+	if overlays[2].Name != "layer3" || overlays[2].Order != 3 {
+		t.Errorf("Expected third overlay to be layer3 with order 3, got %s with order %d", overlays[2].Name, overlays[2].Order)
+	}
+}
+
+func TestLayerOrdering_MultipleRegistries(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "overlay-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create root registry
+	registry1 := &Registry{
+		Version: 1,
+		Overlays: []Overlay{
+			{Name: "root-layer-5", TargetDir: tmpDir, Order: 5},
+			{Name: "root-layer-2", TargetDir: tmpDir, Order: 2},
+		},
+	}
+	if err := SaveRegistry(tmpDir, registry1); err != nil {
+		t.Fatalf("Failed to save registry1: %v", err)
+	}
+
+	// Create subdirectory and registry
+	subdir := filepath.Join(tmpDir, "subdir")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatalf("Failed to create subdir: %v", err)
+	}
+
+	registry2 := &Registry{
+		Version: 1,
+		Overlays: []Overlay{
+			{Name: "sub-layer-1", TargetDir: subdir, Order: 1},
+			{Name: "sub-layer-3", TargetDir: subdir, Order: 3},
+		},
+	}
+	if err := SaveRegistry(subdir, registry2); err != nil {
+		t.Fatalf("Failed to save registry2: %v", err)
+	}
+
+	// Find from subdir - should get all layers sorted by order
+	overlays, err := FindReachableOverlays(subdir)
+	if err != nil {
+		t.Fatalf("FindReachableOverlays failed: %v", err)
+	}
+
+	if len(overlays) != 4 {
+		t.Fatalf("Expected 4 overlays, got %d", len(overlays))
+	}
+
+	// Verify correct order across registries
+	expectedOrder := []struct {
+		name  string
+		order int
+	}{
+		{"sub-layer-1", 1},
+		{"root-layer-2", 2},
+		{"sub-layer-3", 3},
+		{"root-layer-5", 5},
+	}
+
+	for i, expected := range expectedOrder {
+		if overlays[i].Name != expected.name {
+			t.Errorf("Position %d: expected %s, got %s", i, expected.name, overlays[i].Name)
+		}
+		if overlays[i].Order != expected.order {
+			t.Errorf("Position %d: expected order %d, got %d", i, expected.order, overlays[i].Order)
+		}
+	}
+}

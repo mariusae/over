@@ -10,12 +10,13 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "over",
-	Short: "Manage Git repository overlays with hardlinks",
-	Long: `over is a tool for managing "overlays" - Git repositories whose files
+	Short: "Manage Git repository layers with hardlinks",
+	Long: `over is a tool for managing "layers" - Git repositories whose files
 are hardlinked into your working directory.
 
-Repositories are cloned to $HOME/.local/over/<repository> and files are
-hardlinked to the directory where 'over' is invoked.`,
+Layers are cloned to $HOME/.local/over/<layer> and files are
+hardlinked to the directory where 'over' is invoked. Lower order values
+indicate higher precedence when multiple layers contain the same file.`,
 }
 
 // Execute runs the root command.
