@@ -11,11 +11,12 @@ import (
 
 var statusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show status of overlays reachable from current directory",
-	Long: `Show the status of all overlays that are reachable from the current directory.
+	Short: "Show status of layers reachable from current directory",
+	Long: `Show the status of all layers that are reachable from the current directory.
 
-This includes any overlays installed in the current directory or any parent directory.
-For each overlay, it shows changed, new, and deleted files.`,
+This includes any layers installed in the current directory or any parent directory.
+For each layer, it shows changed, new, and deleted files.
+Layers are displayed in order of precedence (lower order = higher precedence).`,
 	RunE: runStatus,
 }
 
@@ -31,7 +32,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(overlays) == 0 {
-		fmt.Println("No overlays found in current directory or parents.")
+		fmt.Println("No layers found in current directory or parents.")
 		return nil
 	}
 
@@ -40,7 +41,7 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			fmt.Println()
 		}
 
-		fmt.Printf("Overlay: %s\n", ov.Name)
+		fmt.Printf("Layer: %s (order: %d)\n", ov.Name, ov.Order)
 		fmt.Printf("  Repository: %s\n", ov.RepoPath)
 		fmt.Printf("  Target: %s\n", ov.TargetDir)
 

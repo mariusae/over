@@ -3,11 +3,13 @@ package overlay
 import (
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // FindReachableOverlays finds all overlays reachable from the given directory.
 // It walks up the directory tree from startDir to the root, collecting overlays
 // from any .over/ directories found along the way. Deduplicates by name.
+// Returns overlays sorted by order (lower order = higher precedence).
 func FindReachableOverlays(startDir string) ([]Overlay, error) {
 	var overlays []Overlay
 	seen := make(map[string]bool)
@@ -33,6 +35,11 @@ func FindReachableOverlays(startDir string) ([]Overlay, error) {
 		}
 		dir = parent
 	}
+
+	// Sort overlays by order (lower values first = higher precedence)
+	sort.Slice(overlays, func(i, j int) bool {
+		return overlays[i].Order < overlays[j].Order
+	})
 
 	return overlays, nil
 }

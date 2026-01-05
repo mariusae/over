@@ -10,11 +10,11 @@ import (
 )
 
 var diffCmd = &cobra.Command{
-	Use:   "diff [repository]",
-	Short: "Show diff of changes in overlay repositories",
-	Long: `Show the diff of uncommitted changes in overlay repositories.
+	Use:   "diff [layer]",
+	Short: "Show diff of changes in layers",
+	Long: `Show the diff of uncommitted changes in layers.
 
-If no repository is specified, shows diffs for all reachable overlays.`,
+If no layer is specified, shows diffs for all reachable layers.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runDiff,
 }

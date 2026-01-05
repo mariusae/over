@@ -12,14 +12,14 @@ import (
 )
 
 var addCmd = &cobra.Command{
-	Use:   "add <repository> <file>",
-	Short: "Add a file to an overlay repository",
-	Long: `Add a file from the current directory to the specified overlay repository.
+	Use:   "add <layer> <file>",
+	Short: "Add a file to a layer",
+	Long: `Add a file from the current directory to the specified layer.
 
 The file will be:
-1. Copied to the repository location
-2. Replaced with a hardlink to the repository copy
-3. Staged for commit in the repository`,
+1. Copied to the layer's repository location
+2. Replaced with a hardlink to the layer copy
+3. Staged for commit in the layer`,
 	Args: cobra.ExactArgs(2),
 	RunE: runAdd,
 }

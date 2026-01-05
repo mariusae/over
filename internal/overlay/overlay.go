@@ -5,13 +5,15 @@ import (
 	"time"
 )
 
-// Overlay represents a single git repository overlay.
+// Overlay represents a single git repository layer.
+// Lower order values have higher precedence (appear "above" higher order layers).
 type Overlay struct {
 	Name        string    `json:"name"`
 	SourceURL   string    `json:"source_url"`
 	RepoPath    string    `json:"repo_path"`
 	TargetDir   string    `json:"target_dir"`
 	InstalledAt time.Time `json:"installed_at"`
+	Order       int       `json:"order"` // Lower values = higher precedence
 }
 
 // FileEntry represents a hardlinked file from an overlay.

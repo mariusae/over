@@ -14,10 +14,10 @@ import (
 var infoCmd = &cobra.Command{
 	Use:   "info <file>",
 	Short: "Show detailed information about a file",
-	Long: `Display detailed information about a specific file including its repository,
+	Long: `Display detailed information about a specific file including its layer,
 modification time, and full git history (shortlog).
 
-The file must be tracked by an overlay repository.`,
+The file must be tracked by a layer.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInfo,
 }
@@ -89,7 +89,7 @@ func runInfo(cmd *cobra.Command, args []string) error {
 
 	// Print file information
 	fmt.Printf("File: %s\n", relPath)
-	fmt.Printf("Repository: %s\n", foundOverlay.Name)
+	fmt.Printf("Layer: %s\n", foundOverlay.Name)
 	fmt.Printf("Status: %s\n", status)
 	fmt.Println()
 

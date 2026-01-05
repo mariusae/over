@@ -15,17 +15,17 @@ var overwriteMode string
 
 var cloneCmd = &cobra.Command{
 	Use:   "clone [name] <giturl>",
-	Short: "Clone a git repository as an overlay",
+	Short: "Clone a git repository as a layer",
 	Long: `Clone a git repository and hardlink its files to the current directory.
 
-The repository is stored in $HOME/.local/over/<name> and files are hardlinked
+The layer is stored in $HOME/.local/over/<name> and files are hardlinked
 to the current directory.
 
-If no name is provided, it defaults to the repository name from the URL.
+If no name is provided, it defaults to the layer name from the URL.
 
 Use -o to handle file conflicts:
-  -o=theirs  Overwrite local files with repository versions
-  -o=ours    Keep local files, skip conflicting repository files`,
+  -o=theirs  Overwrite local files with layer versions
+  -o=ours    Keep local files, skip conflicting layer files`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runClone,
 }
@@ -68,9 +68,9 @@ func runClone(cmd *cobra.Command, args []string) error {
 
 	repoPath := filepath.Join(overStorageDir, repoName)
 
-	// Check if repo already exists
+	// Check if layer already exists
 	if _, err := os.Stat(repoPath); err == nil {
-		return fmt.Errorf("repository %q already exists at %s\nUse 'over clone <name> <url>' to specify a different name", repoName, repoPath)
+		return fmt.Errorf("layer %q already exists at %s\nUse 'over clone <name> <url>' to specify a different name", repoName, repoPath)
 	}
 
 	// Get current working directory
@@ -101,7 +101,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 		}
 
 		if overwriteMode == "theirs" {
-			fmt.Printf("Overwriting %d local files with repository versions...\n", len(conflicts))
+			fmt.Printf("Overwriting %d local files with layer versions...\n", len(conflicts))
 			for _, conflict := range conflicts {
 				targetPath := filepath.Join(cwd, conflict)
 				if err := os.Remove(targetPath); err != nil {
@@ -110,7 +110,7 @@ func runClone(cmd *cobra.Command, args []string) error {
 				}
 			}
 		} else if overwriteMode == "ours" {
-			fmt.Printf("Keeping %d local files, copying to repository...\n", len(conflicts))
+			fmt.Printf("Keeping %d local files, copying to layer...\n", len(conflicts))
 		}
 	}
 
@@ -152,6 +152,6 @@ func runClone(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to save manifest: %w", err)
 	}
 
-	fmt.Printf("Overlay %q installed successfully (%d files)\n", repoName, len(manifest.Files))
+	fmt.Printf("Layer %q installed successfully (%d files)\n", repoName, len(manifest.Files))
 	return nil
 }

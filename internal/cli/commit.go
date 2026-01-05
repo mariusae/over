@@ -15,9 +15,9 @@ import (
 var autoMessage bool
 
 var commitCmd = &cobra.Command{
-	Use:   "commit <repository> [message]",
-	Short: "Commit changes in an overlay repository",
-	Long: `Create a commit in the specified overlay repository.
+	Use:   "commit <layer> [message]",
+	Short: "Commit changes in a layer",
+	Long: `Create a commit in the specified layer.
 
 This commits all tracked file changes (equivalent to git commit -am).
 

@@ -12,13 +12,15 @@ import (
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Synchronize all overlays reachable from current directory",
-	Long: `Synchronize all overlays that are reachable from the current directory.
+	Short: "Synchronize all layers reachable from current directory",
+	Long: `Synchronize all layers that are reachable from the current directory.
 
-For each overlay:
+For each layer (in order of precedence):
 1. Pulls changes from the remote repository
 2. Pushes local commits (if any)
-3. Re-syncs hardlinks (adds new files, removes deleted files)`,
+3. Re-syncs hardlinks (adds new files, removes deleted files)
+
+Higher precedence layers are synced first to ensure proper file ordering.`,
 	RunE: runSync,
 }
 
@@ -34,7 +36,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(overlays) == 0 {
-		fmt.Println("No overlays found in current directory or parents.")
+		fmt.Println("No layers found in current directory or parents.")
 		return nil
 	}
 
