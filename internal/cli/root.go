@@ -38,4 +38,6 @@ func init() {
 	rootCmd.AddCommand(lsCmd)
 	rootCmd.AddCommand(unlinkCmd)
 	rootCmd.AddCommand(linkCmd)
+	rootCmd.AddCommand(editCmd)
+	rootCmd.AddCommand(showCmd)
 }

@@ -10,7 +10,8 @@ import (
 )
 
 // CheckConflicts checks if any files from the repo would conflict with existing files.
-func CheckConflicts(repoPath, targetDir string) ([]string, error) {
+// Only checks files that would be linked according to the linkList patterns.
+func CheckConflicts(repoPath, targetDir string, linkList []string) ([]string, error) {
 	var conflicts []string
 
 	err := filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
@@ -32,6 +33,11 @@ func CheckConflicts(repoPath, targetDir string) ([]string, error) {
 			return err
 		}
 
+		// Skip files not matching linklist patterns
+		if !ShouldLinkFile(linkList, relPath) {
+			return nil
+		}
+
 		targetPath := filepath.Join(targetDir, relPath)
 		if _, err := os.Stat(targetPath); err == nil {
 			conflicts = append(conflicts, relPath)
@@ -44,7 +50,8 @@ func CheckConflicts(repoPath, targetDir string) ([]string, error) {
 }
 
 // CreateHardlinks creates hardlinks from repo files to the target directory.
-func CreateHardlinks(repoPath, targetDir string) (*Manifest, error) {
+// Only links files that match the linkList patterns.
+func CreateHardlinks(repoPath, targetDir string, linkList []string) (*Manifest, error) {
 	manifest := &Manifest{Version: 1, Files: []FileEntry{}}
 
 	err := filepath.WalkDir(repoPath, func(path string, d fs.DirEntry, err error) error {
@@ -65,8 +72,13 @@ func CreateHardlinks(repoPath, targetDir string) (*Manifest, error) {
 		targetPath := filepath.Join(targetDir, relPath)
 
 		if d.IsDir() {
-			// Create corresponding directory in target
+			// Create corresponding directory in target (even if files inside might not be linked)
 			return os.MkdirAll(targetPath, 0755)
+		}
+
+		// Skip files not matching linklist patterns
+		if !ShouldLinkFile(linkList, relPath) {
+			return nil
 		}
 
 		// Skip symlinks
@@ -111,7 +123,8 @@ func CreateHardlinks(repoPath, targetDir string) (*Manifest, error) {
 
 // CreateHardlinksKeepLocal creates hardlinks, but for files in keepLocal list,
 // copies local content to repo first (preserving local version), then hardlinks.
-func CreateHardlinksKeepLocal(repoPath, targetDir string, keepLocal []string) (*Manifest, error) {
+// Only links files that match the linkList patterns.
+func CreateHardlinksKeepLocal(repoPath, targetDir string, linkList []string, keepLocal []string) (*Manifest, error) {
 	keepLocalSet := make(map[string]bool)
 	for _, s := range keepLocal {
 		keepLocalSet[s] = true
@@ -139,6 +152,11 @@ func CreateHardlinksKeepLocal(repoPath, targetDir string, keepLocal []string) (*
 		if d.IsDir() {
 			// Create corresponding directory in target
 			return os.MkdirAll(targetPath, 0755)
+		}
+
+		// Skip files not matching linklist patterns
+		if !ShouldLinkFile(linkList, relPath) {
+			return nil
 		}
 
 		// Skip symlinks
@@ -217,7 +235,7 @@ func CopyFile(src, dst string) error {
 }
 
 // SyncHardlinks synchronizes hardlinks after a git pull.
-// It adds new files and removes deleted files, but skips unlinked files.
+// It adds new files and removes deleted files, but skips unlinked files and respects linklist patterns.
 func SyncHardlinks(overlay Overlay, manifest *Manifest, filesBefore, filesAfter []string) error {
 	beforeSet := make(map[string]bool)
 	for _, f := range filesBefore {
@@ -246,6 +264,10 @@ func SyncHardlinks(overlay Overlay, manifest *Manifest, filesBefore, filesAfter 
 			if unlinkedSet[f] {
 				continue
 			}
+			// Skip if file doesn't match linklist patterns
+			if !ShouldLinkFile(overlay.LinkList, f) {
+				continue
+			}
 			targetPath := filepath.Join(overlay.TargetDir, f)
 			if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
 				fmt.Fprintf(os.Stderr, "warning: failed to remove deleted file %s: %v\n", f, err)
@@ -258,6 +280,10 @@ func SyncHardlinks(overlay Overlay, manifest *Manifest, filesBefore, filesAfter 
 		if !beforeSet[f] {
 			// Skip if file is unlinked
 			if unlinkedSet[f] {
+				continue
+			}
+			// Skip if file doesn't match linklist patterns
+			if !ShouldLinkFile(overlay.LinkList, f) {
 				continue
 			}
 			sourcePath := filepath.Join(overlay.RepoPath, f)

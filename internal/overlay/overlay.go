@@ -13,7 +13,8 @@ type Overlay struct {
 	RepoPath    string    `json:"repo_path"`
 	TargetDir   string    `json:"target_dir"`
 	InstalledAt time.Time `json:"installed_at"`
-	Order       int       `json:"order"` // Lower values = higher precedence
+	Order       int       `json:"order"`         // Lower values = higher precedence
+	LinkList    []string  `json:"link_list,omitempty"` // Gitignore-style patterns for files to link
 }
 
 // FileEntry represents a hardlinked file from an overlay.
