@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ChangeStatus represents the status of a file change.
@@ -188,4 +189,93 @@ func HasConflicts(repoPath string) (bool, error) {
 		return false, err
 	}
 	return len(strings.TrimSpace(string(out))) > 0, nil
+}
+
+// Fetch performs a git fetch in the specified repository.
+func Fetch(repoPath string) error {
+	cmd := exec.Command("git", "fetch")
+	cmd.Dir = repoPath
+	// Suppress output to avoid cluttering the console
+	cmd.Stderr = nil
+	cmd.Stdout = nil
+	return cmd.Run()
+}
+
+// DiffRemote returns a list of files that differ between HEAD and the remote tracking branch.
+func DiffRemote(repoPath string) ([]string, error) {
+	// Get the current branch
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = repoPath
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	branch := strings.TrimSpace(string(branchOut))
+
+	// Get files that differ from remote
+	remoteBranch := fmt.Sprintf("origin/%s", branch)
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD", remoteBranch)
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		// If the remote branch doesn't exist, return empty list
+		return []string{}, nil
+	}
+
+	var files []string
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		file := strings.TrimSpace(scanner.Text())
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+
+	return files, scanner.Err()
+}
+
+// FileLog returns the git log history for a specific file.
+func FileLog(repoPath, filePath string) ([]LogEntry, error) {
+	// Format: %H (commit hash) | %an (author name) | %ae (author email) | %ai (author date ISO) | %s (subject)
+	cmd := exec.Command("git", "log", "--follow", "--format=%H|%an|%ae|%ai|%s", "--", filePath)
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var entries []LogEntry
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		line := scanner.Text()
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) != 5 {
+			continue
+		}
+
+		date, err := time.Parse("2006-01-02 15:04:05 -0700", parts[3])
+		if err != nil {
+			// Try without timezone
+			date, _ = time.Parse("2006-01-02 15:04:05", parts[3][:19])
+		}
+
+		entries = append(entries, LogEntry{
+			Hash:        parts[0][:8], // Short hash
+			Author:      parts[1],
+			AuthorEmail: parts[2],
+			Date:        date,
+			Subject:     parts[4],
+		})
+	}
+
+	return entries, scanner.Err()
+}
+
+// LogEntry represents a single entry in the git log.
+type LogEntry struct {
+	Hash        string
+	Author      string
+	AuthorEmail string
+	Date        time.Time
+	Subject     string
 }

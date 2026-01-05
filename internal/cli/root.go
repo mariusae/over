@@ -34,4 +34,5 @@ func init() {
 	rootCmd.AddCommand(commitCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(lsCmd)
 }
