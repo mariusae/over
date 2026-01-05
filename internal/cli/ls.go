@@ -39,6 +39,7 @@ func init() {
 
 type fileInfo struct {
 	RelativePath string
+	DisplayPath  string
 	RepoName     string
 	Status       string
 	ModTime      time.Time
@@ -145,8 +146,17 @@ func runLs(cmd *cobra.Command, args []string) error {
 				}
 			}
 
+			// Compute display path: absolute by default, relative if invoked from same directory
+			displayPath := targetFilePath // Default to absolute path
+
+			// If cwd is within target directory, show relative path from cwd
+			if relFromCwd, err := filepath.Rel(cwd, targetFilePath); err == nil && !filepath.IsAbs(relFromCwd) {
+				displayPath = relFromCwd
+			}
+
 			files = append(files, fileInfo{
 				RelativePath: entry.RelativePath,
+				DisplayPath:  displayPath,
 				RepoName:     ov.Name,
 				Status:       status,
 				ModTime:      modTime,
@@ -154,15 +164,15 @@ func runLs(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Sort files by path
+	// Sort files by display path
 	sort.Slice(files, func(i, j int) bool {
-		return files[i].RelativePath < files[j].RelativePath
+		return files[i].DisplayPath < files[j].DisplayPath
 	})
 
 	// Print files
 	for _, f := range files {
 		fmt.Printf("%-50s %-20s %-20s %s\n",
-			f.RelativePath,
+			f.DisplayPath,
 			f.RepoName,
 			f.Status,
 			f.ModTime.Format("2006-01-02 15:04:05"))
