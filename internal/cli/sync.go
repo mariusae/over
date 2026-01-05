@@ -6,6 +6,7 @@ import (
 
 	"github.com/meriksen/over/internal/git"
 	"github.com/meriksen/over/internal/overlay"
+	"github.com/meriksen/over/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -52,16 +53,20 @@ func runSync(cmd *cobra.Command, args []string) error {
 			filesBefore = []string{}
 		}
 
-		// Git pull
-		fmt.Println("  Pulling...")
+		// Git pull with spinner
+		spinner := ui.NewBrailleSpinner("Pulling...")
+		spinner.Start()
 		if err := git.Pull(ov.RepoPath); err != nil {
 			// Check if it's a conflict
 			if hasConflicts, _ := git.HasConflicts(ov.RepoPath); hasConflicts {
+				spinner.Stop("")
 				fmt.Printf("  Error: merge conflicts detected in %s\n", ov.Name)
 				fmt.Printf("  Resolve conflicts manually in: %s\n", ov.RepoPath)
 				continue // Skip to next overlay
 			}
-			fmt.Printf("  Warning: pull failed: %v\n", err)
+			spinner.Stop(fmt.Sprintf("  Warning: pull failed: %v", err))
+		} else {
+			spinner.Stop("  ✓ Pulled")
 		}
 
 		// Git push (only if there are local commits)
@@ -69,9 +74,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			fmt.Printf("  Warning: could not check for unpushed commits: %v\n", err)
 		} else if hasUnpushed {
-			fmt.Println("  Pushing...")
+			spinner = ui.NewBrailleSpinner("Pushing...")
+			spinner.Start()
 			if err := git.Push(ov.RepoPath); err != nil {
-				fmt.Printf("  Warning: push failed: %v\n", err)
+				spinner.Stop(fmt.Sprintf("  Warning: push failed: %v", err))
+			} else {
+				spinner.Stop("  ✓ Pushed")
 			}
 		}
 
@@ -82,9 +90,13 @@ func runSync(cmd *cobra.Command, args []string) error {
 			filesAfter = []string{}
 		}
 
-		// Re-sync hardlinks
+		// Re-sync hardlinks with spinner
+		spinner = ui.NewBrailleSpinner("Syncing hardlinks...")
+		spinner.Start()
 		if err := overlay.SyncHardlinks(ov, filesBefore, filesAfter); err != nil {
-			fmt.Printf("  Warning: hardlink sync failed: %v\n", err)
+			spinner.Stop(fmt.Sprintf("  Warning: hardlink sync failed: %v", err))
+		} else {
+			spinner.Stop("  ✓ Hardlinks synced")
 		}
 
 		fmt.Println("  Done")
