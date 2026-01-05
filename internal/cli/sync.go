@@ -90,10 +90,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 			filesAfter = []string{}
 		}
 
+		// Load manifest to check for unlinked files
+		manifest, err := overlay.LoadManifest(ov.TargetDir, ov.Name)
+		if err != nil {
+			fmt.Printf("  Warning: could not load manifest: %v\n", err)
+			manifest = nil
+		}
+
 		// Re-sync hardlinks with spinner
 		spinner = ui.NewBrailleSpinner("Syncing hardlinks...")
 		spinner.Start()
-		if err := overlay.SyncHardlinks(ov, filesBefore, filesAfter); err != nil {
+		if err := overlay.SyncHardlinks(ov, manifest, filesBefore, filesAfter); err != nil {
 			spinner.Stop(fmt.Sprintf("  Warning: hardlink sync failed: %v", err))
 		} else {
 			spinner.Stop("  ✓ Hardlinks synced")
