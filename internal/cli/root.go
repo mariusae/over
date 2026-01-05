@@ -40,4 +40,5 @@ func init() {
 	rootCmd.AddCommand(linkCmd)
 	rootCmd.AddCommand(editCmd)
 	rootCmd.AddCommand(showCmd)
+	rootCmd.AddCommand(autosyncCmd)
 }
