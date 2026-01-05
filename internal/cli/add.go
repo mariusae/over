@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +81,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 		}
 
 		// Copy file content to repo
-		if err := copyFile(absFilePath, repoFilePath); err != nil {
+		if err := overlay.CopyFile(absFilePath, repoFilePath); err != nil {
 			return fmt.Errorf("failed to copy file to repo: %w", err)
 		}
 
@@ -93,7 +92,7 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 		if err := os.Link(repoFilePath, absFilePath); err != nil {
 			// Try to restore the file if hardlink fails
-			copyFile(repoFilePath, absFilePath)
+			_ = overlay.CopyFile(repoFilePath, absFilePath)
 			return fmt.Errorf("failed to create hardlink: %w", err)
 		}
 	}
@@ -105,26 +104,4 @@ func runAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Added %s to overlay %s\n", relPath, repoName)
 	return nil
-}
-
-func copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer srcFile.Close()
-
-	srcInfo, err := srcFile.Stat()
-	if err != nil {
-		return err
-	}
-
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
-	if err != nil {
-		return err
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
 }
