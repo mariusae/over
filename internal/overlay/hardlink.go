@@ -155,7 +155,7 @@ func CreateHardlinksKeepLocal(repoPath, targetDir string, keepLocal []string) (*
 		// Handle files in keepLocal list: copy local → repo, then hardlink
 		if keepLocalSet[relPath] {
 			// Copy local file content to repo (overwriting repo version)
-			if err := copyFile(targetPath, path); err != nil {
+			if err := CopyFile(targetPath, path); err != nil {
 				return fmt.Errorf("failed to copy local file to repo %s: %w", relPath, err)
 			}
 			// Remove local file
@@ -193,7 +193,8 @@ func CreateHardlinksKeepLocal(repoPath, targetDir string, keepLocal []string) (*
 	return manifest, err
 }
 
-func copyFile(src, dst string) error {
+// CopyFile copies a file from src to dst, preserving permissions.
+func CopyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
@@ -232,7 +233,9 @@ func SyncHardlinks(overlay Overlay, filesBefore, filesAfter []string) error {
 	for _, f := range filesBefore {
 		if !afterSet[f] {
 			targetPath := filepath.Join(overlay.TargetDir, f)
-			os.Remove(targetPath)
+			if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "warning: failed to remove deleted file %s: %v\n", f, err)
+			}
 		}
 	}
 

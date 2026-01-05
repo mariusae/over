@@ -62,7 +62,9 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		gitCmd.Dir = ov.RepoPath
 		gitCmd.Stdout = os.Stdout
 		gitCmd.Stderr = os.Stderr
-		gitCmd.Run()
+		if err := gitCmd.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: git diff failed for %s: %v\n", ov.Name, err)
+		}
 	}
 
 	return nil
