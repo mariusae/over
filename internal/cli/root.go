@@ -35,4 +35,6 @@ func init() {
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(lsCmd)
+	rootCmd.AddCommand(unlinkCmd)
+	rootCmd.AddCommand(linkCmd)
 }

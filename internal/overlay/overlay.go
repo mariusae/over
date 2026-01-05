@@ -20,6 +20,7 @@ type FileEntry struct {
 	Inode        uint64 `json:"inode"`
 	Size         int64  `json:"size"`
 	Mode         uint32 `json:"mode"`
+	Unlinked     bool   `json:"unlinked,omitempty"` // True if file was intentionally unlinked
 }
 
 // Manifest tracks all files from an overlay in a target directory.

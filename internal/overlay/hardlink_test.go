@@ -265,7 +265,7 @@ func TestSyncHardlinks(t *testing.T) {
 	os.WriteFile(filepath.Join(repoDir, "file3.txt"), []byte("new content"), 0644)
 
 	// Sync hardlinks
-	if err := SyncHardlinks(overlay, filesBefore, filesAfter); err != nil {
+	if err := SyncHardlinks(overlay, nil, filesBefore, filesAfter); err != nil {
 		t.Fatalf("SyncHardlinks failed: %v", err)
 	}
 

@@ -59,9 +59,24 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Check for broken hardlinks
+		// Check for broken hardlinks and unlinked files
 		manifest, err := overlay.LoadManifest(ov.TargetDir, ov.Name)
 		if err == nil && len(manifest.Files) > 0 {
+			// Show unlinked files
+			unlinked := []string{}
+			for _, entry := range manifest.Files {
+				if entry.Unlinked {
+					unlinked = append(unlinked, entry.RelativePath)
+				}
+			}
+			if len(unlinked) > 0 {
+				fmt.Println("  Unlinked files:")
+				for _, f := range unlinked {
+					fmt.Printf("    ~ %s\n", f)
+				}
+			}
+
+			// Show broken hardlinks
 			broken := overlay.CheckBrokenHardlinks(ov, manifest)
 			if len(broken) > 0 {
 				fmt.Println("  Broken hardlinks:")

@@ -217,8 +217,8 @@ func CopyFile(src, dst string) error {
 }
 
 // SyncHardlinks synchronizes hardlinks after a git pull.
-// It adds new files and removes deleted files.
-func SyncHardlinks(overlay Overlay, filesBefore, filesAfter []string) error {
+// It adds new files and removes deleted files, but skips unlinked files.
+func SyncHardlinks(overlay Overlay, manifest *Manifest, filesBefore, filesAfter []string) error {
 	beforeSet := make(map[string]bool)
 	for _, f := range filesBefore {
 		beforeSet[f] = true
@@ -229,9 +229,23 @@ func SyncHardlinks(overlay Overlay, filesBefore, filesAfter []string) error {
 		afterSet[f] = true
 	}
 
+	// Build map of unlinked files
+	unlinkedSet := make(map[string]bool)
+	if manifest != nil {
+		for _, entry := range manifest.Files {
+			if entry.Unlinked {
+				unlinkedSet[entry.RelativePath] = true
+			}
+		}
+	}
+
 	// Handle deleted files
 	for _, f := range filesBefore {
 		if !afterSet[f] {
+			// Skip if file is unlinked
+			if unlinkedSet[f] {
+				continue
+			}
 			targetPath := filepath.Join(overlay.TargetDir, f)
 			if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
 				fmt.Fprintf(os.Stderr, "warning: failed to remove deleted file %s: %v\n", f, err)
@@ -242,6 +256,10 @@ func SyncHardlinks(overlay Overlay, filesBefore, filesAfter []string) error {
 	// Handle new files
 	for _, f := range filesAfter {
 		if !beforeSet[f] {
+			// Skip if file is unlinked
+			if unlinkedSet[f] {
+				continue
+			}
 			sourcePath := filepath.Join(overlay.RepoPath, f)
 			targetPath := filepath.Join(overlay.TargetDir, f)
 
@@ -267,6 +285,11 @@ func CheckBrokenHardlinks(overlay Overlay, manifest *Manifest) []string {
 	var broken []string
 
 	for _, entry := range manifest.Files {
+		// Skip intentionally unlinked files
+		if entry.Unlinked {
+			continue
+		}
+
 		repoPath := filepath.Join(overlay.RepoPath, entry.RelativePath)
 		targetPath := filepath.Join(overlay.TargetDir, entry.RelativePath)
 
@@ -289,4 +312,117 @@ func CheckBrokenHardlinks(overlay Overlay, manifest *Manifest) []string {
 	}
 
 	return broken
+}
+
+// UnlinkFile intentionally unlinks a file from the overlay, creating a new inode.
+func UnlinkFile(overlay Overlay, manifest *Manifest, relPath string) error {
+	targetPath := filepath.Join(overlay.TargetDir, relPath)
+
+	// Check if file exists
+	targetInfo, err := os.Stat(targetPath)
+	if err != nil {
+		return fmt.Errorf("file does not exist: %w", err)
+	}
+
+	// Find the file in the manifest
+	var entry *FileEntry
+	for i := range manifest.Files {
+		if manifest.Files[i].RelativePath == relPath {
+			entry = &manifest.Files[i]
+			break
+		}
+	}
+
+	if entry == nil {
+		return fmt.Errorf("file %s not found in manifest", relPath)
+	}
+
+	if entry.Unlinked {
+		return fmt.Errorf("file %s is already unlinked", relPath)
+	}
+
+	// Create a temporary copy
+	tempPath := targetPath + ".tmp"
+	if err := CopyFile(targetPath, tempPath); err != nil {
+		return fmt.Errorf("failed to copy file: %w", err)
+	}
+
+	// Remove the hardlinked file
+	if err := os.Remove(targetPath); err != nil {
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to remove hardlink: %w", err)
+	}
+
+	// Rename temp file to target (creates new inode)
+	if err := os.Rename(tempPath, targetPath); err != nil {
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	// Update manifest to mark as unlinked
+	entry.Unlinked = true
+	// Update inode info
+	stat, ok := targetInfo.Sys().(*syscall.Stat_t)
+	if ok {
+		entry.Inode = stat.Ino
+	}
+
+	return nil
+}
+
+// RelinkFile relinks a previously unlinked file, copying content to repo first.
+func RelinkFile(overlay Overlay, manifest *Manifest, relPath string) error {
+	targetPath := filepath.Join(overlay.TargetDir, relPath)
+	repoPath := filepath.Join(overlay.RepoPath, relPath)
+
+	// Check if target file exists
+	if _, err := os.Stat(targetPath); err != nil {
+		return fmt.Errorf("target file does not exist: %w", err)
+	}
+
+	// Find the file in the manifest
+	var entry *FileEntry
+	for i := range manifest.Files {
+		if manifest.Files[i].RelativePath == relPath {
+			entry = &manifest.Files[i]
+			break
+		}
+	}
+
+	if entry == nil {
+		return fmt.Errorf("file %s not found in manifest", relPath)
+	}
+
+	if !entry.Unlinked {
+		return fmt.Errorf("file %s is not unlinked", relPath)
+	}
+
+	// Copy target file content to repo (user's version wins)
+	if err := CopyFile(targetPath, repoPath); err != nil {
+		return fmt.Errorf("failed to copy file to repo: %w", err)
+	}
+
+	// Remove target file
+	if err := os.Remove(targetPath); err != nil {
+		return fmt.Errorf("failed to remove target file: %w", err)
+	}
+
+	// Create hardlink
+	if err := os.Link(repoPath, targetPath); err != nil {
+		return fmt.Errorf("failed to create hardlink: %w", err)
+	}
+
+	// Update manifest
+	entry.Unlinked = false
+	info, err := os.Stat(repoPath)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if ok {
+		entry.Inode = stat.Ino
+	}
+	entry.Size = info.Size()
+	entry.Mode = uint32(info.Mode())
+
+	return nil
 }

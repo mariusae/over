@@ -452,7 +452,7 @@ func TestIntegrationHardlinkSync(t *testing.T) {
 		TargetDir: targetDir,
 	}
 
-	if err := overlay.SyncHardlinks(ov, filesBefore, filesAfter); err != nil {
+	if err := overlay.SyncHardlinks(ov, nil, filesBefore, filesAfter); err != nil {
 		t.Fatalf("Failed to sync hardlinks: %v", err)
 	}
 
@@ -516,5 +516,300 @@ func TestIntegrationBrokenHardlinks(t *testing.T) {
 		if !strings.Contains(broken[0], "test.txt") {
 			t.Errorf("Expected broken link to be test.txt, got %q", broken[0])
 		}
+	}
+}
+
+// TestIntegrationUnlinkFile tests the UnlinkFile function
+func TestIntegrationUnlinkFile(t *testing.T) {
+	// Setup
+	tmpDir, err := os.MkdirTemp("", "over-integration-unlink-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoDir := filepath.Join(tmpDir, "repo")
+	targetDir := filepath.Join(tmpDir, "target")
+
+	os.MkdirAll(repoDir, 0755)
+	os.MkdirAll(targetDir, 0755)
+
+	// Create file in repo
+	repoFile := filepath.Join(repoDir, "test.txt")
+	os.WriteFile(repoFile, []byte("original content"), 0644)
+
+	// Create manifest by hardlinking
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+
+	ov := overlay.Overlay{
+		Name:      "test-overlay",
+		RepoPath:  repoDir,
+		TargetDir: targetDir,
+	}
+
+	targetFile := filepath.Join(targetDir, "test.txt")
+
+	// Verify hardlink exists
+	repoInfo, _ := os.Stat(repoFile)
+	targetInfo, _ := os.Stat(targetFile)
+	if !os.SameFile(repoInfo, targetInfo) {
+		t.Fatal("Files should be hardlinked initially")
+	}
+
+	// Unlink the file
+	if err := overlay.UnlinkFile(ov, manifest, "test.txt"); err != nil {
+		t.Fatalf("Failed to unlink file: %v", err)
+	}
+
+	// Verify hardlink is broken
+	repoInfo, _ = os.Stat(repoFile)
+	targetInfo, _ = os.Stat(targetFile)
+	if os.SameFile(repoInfo, targetInfo) {
+		t.Error("Files should not be hardlinked after unlink")
+	}
+
+	// Verify manifest is updated
+	var found bool
+	for _, entry := range manifest.Files {
+		if entry.RelativePath == "test.txt" {
+			found = true
+			if !entry.Unlinked {
+				t.Error("File should be marked as unlinked in manifest")
+			}
+		}
+	}
+	if !found {
+		t.Error("File not found in manifest")
+	}
+
+	// Verify file content is preserved
+	content, _ := os.ReadFile(targetFile)
+	if string(content) != "original content" {
+		t.Errorf("Expected content 'original content', got %q", string(content))
+	}
+
+	// Verify attempting to unlink again fails
+	if err := overlay.UnlinkFile(ov, manifest, "test.txt"); err == nil {
+		t.Error("Expected error when unlinking already unlinked file")
+	}
+}
+
+// TestIntegrationRelinkFile tests the RelinkFile function
+func TestIntegrationRelinkFile(t *testing.T) {
+	// Setup
+	tmpDir, err := os.MkdirTemp("", "over-integration-relink-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoDir := filepath.Join(tmpDir, "repo")
+	targetDir := filepath.Join(tmpDir, "target")
+
+	os.MkdirAll(repoDir, 0755)
+	os.MkdirAll(targetDir, 0755)
+
+	// Create file in repo
+	repoFile := filepath.Join(repoDir, "test.txt")
+	os.WriteFile(repoFile, []byte("repo content"), 0644)
+
+	// Create manifest by hardlinking
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+
+	ov := overlay.Overlay{
+		Name:      "test-overlay",
+		RepoPath:  repoDir,
+		TargetDir: targetDir,
+	}
+
+	targetFile := filepath.Join(targetDir, "test.txt")
+
+	// Unlink the file
+	if err := overlay.UnlinkFile(ov, manifest, "test.txt"); err != nil {
+		t.Fatalf("Failed to unlink file: %v", err)
+	}
+
+	// Modify the target file
+	os.WriteFile(targetFile, []byte("user content"), 0644)
+
+	// Relink the file
+	if err := overlay.RelinkFile(ov, manifest, "test.txt"); err != nil {
+		t.Fatalf("Failed to relink file: %v", err)
+	}
+
+	// Verify hardlink exists
+	repoInfo, _ := os.Stat(repoFile)
+	targetInfo, _ := os.Stat(targetFile)
+	if !os.SameFile(repoInfo, targetInfo) {
+		t.Error("Files should be hardlinked after relink")
+	}
+
+	// Verify user content wins
+	repoContent, _ := os.ReadFile(repoFile)
+	targetContent, _ := os.ReadFile(targetFile)
+	if string(repoContent) != "user content" {
+		t.Errorf("Expected repo content 'user content', got %q", string(repoContent))
+	}
+	if string(targetContent) != "user content" {
+		t.Errorf("Expected target content 'user content', got %q", string(targetContent))
+	}
+
+	// Verify manifest is updated
+	var found bool
+	for _, entry := range manifest.Files {
+		if entry.RelativePath == "test.txt" {
+			found = true
+			if entry.Unlinked {
+				t.Error("File should not be marked as unlinked in manifest after relink")
+			}
+		}
+	}
+	if !found {
+		t.Error("File not found in manifest")
+	}
+
+	// Verify attempting to relink again fails
+	if err := overlay.RelinkFile(ov, manifest, "test.txt"); err == nil {
+		t.Error("Expected error when relinking already linked file")
+	}
+}
+
+// TestIntegrationSyncWithUnlinkedFiles tests that sync skips unlinked files
+func TestIntegrationSyncWithUnlinkedFiles(t *testing.T) {
+	// Setup
+	repoPath := setupTestGitRepo(t)
+	defer os.RemoveAll(repoPath)
+
+	// Create target directory
+	targetDir, err := os.MkdirTemp("", "over-integration-sync-unlinked-*")
+	if err != nil {
+		t.Fatalf("Failed to create target dir: %v", err)
+	}
+	defer os.RemoveAll(targetDir)
+
+	// Clone and create initial hardlinks
+	tmpRepoPath := filepath.Join(targetDir, ".tmp-repo")
+	if err := git.Clone(repoPath, tmpRepoPath); err != nil {
+		t.Fatalf("Failed to clone repo: %v", err)
+	}
+
+	// Disable GPG signing
+	cmd := exec.Command("git", "config", "commit.gpgsign", "false")
+	cmd.Dir = tmpRepoPath
+	cmd.Run()
+
+	// Get initial file list
+	filesBefore, err := git.ListFiles(tmpRepoPath)
+	if err != nil {
+		t.Fatalf("Failed to list files: %v", err)
+	}
+
+	// Create hardlinks
+	manifest, err := overlay.CreateHardlinks(tmpRepoPath, targetDir)
+	if err != nil {
+		t.Fatalf("Failed to create hardlinks: %v", err)
+	}
+
+	ov := overlay.Overlay{
+		Name:      "test-overlay",
+		RepoPath:  tmpRepoPath,
+		TargetDir: targetDir,
+	}
+
+	// Unlink README.md
+	if err := overlay.UnlinkFile(ov, manifest, "README.md"); err != nil {
+		t.Fatalf("Failed to unlink README.md: %v", err)
+	}
+
+	// Modify the unlinked file
+	readmePath := filepath.Join(targetDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# Modified by user"), 0644); err != nil {
+		t.Fatalf("Failed to modify unlinked file: %v", err)
+	}
+
+	// Modify repo: update README.md in repo
+	repoReadme := filepath.Join(tmpRepoPath, "README.md")
+	if err := os.WriteFile(repoReadme, []byte("# Updated in repo"), 0644); err != nil {
+		t.Fatalf("Failed to update file in repo: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", "README.md")
+	cmd.Dir = tmpRepoPath
+	cmd.Run()
+
+	cmd = exec.Command("git", "commit", "-m", "Update README")
+	cmd.Dir = tmpRepoPath
+	cmd.Run()
+
+	// Get new file list
+	filesAfter, err := git.ListFiles(tmpRepoPath)
+	if err != nil {
+		t.Fatalf("Failed to list files after changes: %v", err)
+	}
+
+	// Sync hardlinks (should skip unlinked README.md)
+	if err := overlay.SyncHardlinks(ov, manifest, filesBefore, filesAfter); err != nil {
+		t.Fatalf("Failed to sync hardlinks: %v", err)
+	}
+
+	// Verify unlinked file was NOT updated
+	userContent, _ := os.ReadFile(readmePath)
+	if string(userContent) != "# Modified by user" {
+		t.Errorf("Expected unlinked file to keep user content, got %q", string(userContent))
+	}
+
+	// Verify files are still not hardlinked
+	repoInfo, _ := os.Stat(repoReadme)
+	targetInfo, _ := os.Stat(readmePath)
+	if os.SameFile(repoInfo, targetInfo) {
+		t.Error("Unlinked file should remain unlinked after sync")
+	}
+}
+
+// TestIntegrationCheckBrokenHardlinksSkipsUnlinked tests that CheckBrokenHardlinks skips unlinked files
+func TestIntegrationCheckBrokenHardlinksSkipsUnlinked(t *testing.T) {
+	// Setup
+	tmpDir, err := os.MkdirTemp("", "over-integration-check-unlinked-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	repoDir := filepath.Join(tmpDir, "repo")
+	targetDir := filepath.Join(tmpDir, "target")
+
+	os.MkdirAll(repoDir, 0755)
+	os.MkdirAll(targetDir, 0755)
+
+	// Create files in repo
+	os.WriteFile(filepath.Join(repoDir, "linked.txt"), []byte("content"), 0644)
+	os.WriteFile(filepath.Join(repoDir, "unlinked.txt"), []byte("content"), 0644)
+
+	// Create manifest by hardlinking
+	manifest, _ := overlay.CreateHardlinks(repoDir, targetDir)
+
+	ov := overlay.Overlay{
+		Name:      "test-overlay",
+		RepoPath:  repoDir,
+		TargetDir: targetDir,
+	}
+
+	// Unlink one file
+	if err := overlay.UnlinkFile(ov, manifest, "unlinked.txt"); err != nil {
+		t.Fatalf("Failed to unlink file: %v", err)
+	}
+
+	// Break the hardlink on linked file
+	linkedTarget := filepath.Join(targetDir, "linked.txt")
+	os.Remove(linkedTarget)
+	os.WriteFile(linkedTarget, []byte("different"), 0644)
+
+	// Check broken hardlinks (should only report linked.txt)
+	broken := overlay.CheckBrokenHardlinks(ov, manifest)
+	if len(broken) != 1 {
+		t.Errorf("Expected 1 broken link, got %d", len(broken))
+	}
+	if len(broken) > 0 && !strings.Contains(broken[0], "linked.txt") {
+		t.Errorf("Expected broken link to be linked.txt, got %q", broken[0])
 	}
 }
