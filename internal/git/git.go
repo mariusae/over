@@ -169,6 +169,15 @@ func Commit(repoPath, message string) error {
 	return cmd.Run()
 }
 
+// CommitStaged creates a commit with staged changes only (git commit -m).
+func CommitStaged(repoPath, message string) error {
+	cmd := exec.Command("git", "commit", "-m", message)
+	cmd.Dir = repoPath
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // HasUncommittedChanges checks if there are uncommitted changes in the repository.
 func HasUncommittedChanges(repoPath string) (bool, error) {
 	cmd := exec.Command("git", "status", "--porcelain")

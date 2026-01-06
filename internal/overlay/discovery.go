@@ -58,3 +58,40 @@ func FindOverlayByName(startDir, name string) (*Overlay, error) {
 	}
 	return nil, nil
 }
+
+// FindOverlayForFile finds which overlay owns a specific file.
+// Returns the overlay with the highest precedence that tracks the file.
+// The filePath should be relative to startDir.
+func FindOverlayForFile(startDir, filePath string) (*Overlay, error) {
+	// Make filePath absolute for comparison
+	absFilePath := filePath
+	if !filepath.IsAbs(filePath) {
+		absFilePath = filepath.Join(startDir, filePath)
+	}
+
+	overlays, err := FindReachableOverlays(startDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check each overlay in order of precedence (already sorted by FindReachableOverlays)
+	for i := range overlays {
+		ov := &overlays[i]
+
+		// Load manifest for this overlay
+		manifest, err := LoadManifest(ov.TargetDir, ov.Name)
+		if err != nil {
+			continue // Skip if we can't load manifest
+		}
+
+		// Check if this overlay tracks the file
+		for _, entry := range manifest.Files {
+			entryPath := filepath.Join(ov.TargetDir, entry.RelativePath)
+			if entryPath == absFilePath {
+				return ov, nil
+			}
+		}
+	}
+
+	return nil, nil
+}
