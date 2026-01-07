@@ -41,9 +41,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			fmt.Println()
 		}
 
-		fmt.Printf("Layer: %s (order: %d)\n", ov.Name, ov.Order)
+		fmt.Printf("Layer: %s\n", ov.Name)
 		fmt.Printf("  Repository: %s\n", ov.RepoPath)
 		fmt.Printf("  Target: %s\n", ov.TargetDir)
+		fmt.Printf("  Order: %d\n", ov.Order)
 
 		changes, err := git.Status(ov.RepoPath)
 		if err != nil {
