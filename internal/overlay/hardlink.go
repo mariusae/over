@@ -395,6 +395,101 @@ func UnlinkFile(overlay Overlay, manifest *Manifest, relPath string) error {
 	return nil
 }
 
+// IsBrokenHardlink checks if a specific file has a broken hardlink.
+func IsBrokenHardlink(overlay Overlay, manifest *Manifest, relPath string) bool {
+	// Find the file in the manifest
+	var entry *FileEntry
+	for i := range manifest.Files {
+		if manifest.Files[i].RelativePath == relPath {
+			entry = &manifest.Files[i]
+			break
+		}
+	}
+
+	if entry == nil {
+		return false
+	}
+
+	// Intentionally unlinked files are not considered broken
+	if entry.Unlinked {
+		return false
+	}
+
+	repoPath := filepath.Join(overlay.RepoPath, relPath)
+	targetPath := filepath.Join(overlay.TargetDir, relPath)
+
+	repoInfo, err := os.Stat(repoPath)
+	if err != nil {
+		return true // Repo file missing
+	}
+
+	targetInfo, err := os.Stat(targetPath)
+	if err != nil {
+		return true // Target file missing
+	}
+
+	// Check if they're the same file (hardlinked)
+	return !os.SameFile(repoInfo, targetInfo)
+}
+
+// RelinkBrokenFile relinks a file with a broken hardlink, copying the checked out
+// version to the repository first (checked out version replaces repository version).
+func RelinkBrokenFile(overlay Overlay, manifest *Manifest, relPath string) error {
+	targetPath := filepath.Join(overlay.TargetDir, relPath)
+	repoPath := filepath.Join(overlay.RepoPath, relPath)
+
+	// Check if target file exists
+	if _, err := os.Stat(targetPath); err != nil {
+		return fmt.Errorf("target file does not exist: %w", err)
+	}
+
+	// Find the file in the manifest
+	var entry *FileEntry
+	for i := range manifest.Files {
+		if manifest.Files[i].RelativePath == relPath {
+			entry = &manifest.Files[i]
+			break
+		}
+	}
+
+	if entry == nil {
+		return fmt.Errorf("file %s not found in manifest", relPath)
+	}
+
+	if entry.Unlinked {
+		return fmt.Errorf("file %s is intentionally unlinked, use 'link' instead", relPath)
+	}
+
+	// Copy target file content to repo (checked out version wins)
+	if err := CopyFile(targetPath, repoPath); err != nil {
+		return fmt.Errorf("failed to copy file to repo: %w", err)
+	}
+
+	// Remove target file
+	if err := os.Remove(targetPath); err != nil {
+		return fmt.Errorf("failed to remove target file: %w", err)
+	}
+
+	// Create hardlink
+	if err := os.Link(repoPath, targetPath); err != nil {
+		return fmt.Errorf("failed to create hardlink: %w", err)
+	}
+
+	// Update manifest
+	info, err := os.Stat(repoPath)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if ok {
+		entry.Inode = stat.Ino
+	}
+	entry.Size = info.Size()
+	entry.Mode = uint32(info.Mode())
+
+	return nil
+}
+
 // RelinkFile relinks a previously unlinked file, copying content to repo first.
 func RelinkFile(overlay Overlay, manifest *Manifest, relPath string) error {
 	targetPath := filepath.Join(overlay.TargetDir, relPath)
