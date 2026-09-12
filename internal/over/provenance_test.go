@@ -141,3 +141,23 @@ func TestParseCommitIgnoresOtherFiles(t *testing.T) {
 		t.Errorf("reason = %q, want %q", rec.Reason, ReasonAck)
 	}
 }
+
+// TestDefaultURL pins the scheme over reaches repositories with. SSH
+// needs nothing over cannot supply; HTTPS wants a credential helper, and
+// over has no way to ask for a password.
+func TestDefaultURL(t *testing.T) {
+	s, err := spec.Parse("mariusae/env:apex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := DefaultURL(s), "git@github.com:mariusae/env.git"; got != want {
+		t.Errorf("DefaultURL = %q, want %q", got, want)
+	}
+	other, err := spec.Parse("git.example.com/m/c:etc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := DefaultURL(other), "git@git.example.com:m/c.git"; got != want {
+		t.Errorf("DefaultURL = %q, want %q", got, want)
+	}
+}

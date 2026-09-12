@@ -29,7 +29,7 @@ type Repo struct {
 func Open(ctx context.Context, dir, url string) (*Repo, error) {
 	r := &Repo{dir: dir, url: url}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		return r, nil
+		return r, r.setOrigin(ctx)
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -51,6 +51,25 @@ func Open(ctx context.Context, dir, url string) (*Repo, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// setOrigin points the checkout's origin at the URL over means to use.
+// The URL can change under a checkout -- the default moved from HTTPS to
+// SSH, or $OVER_URL was set -- and the cache is over's to keep current,
+// so the checkout follows rather than being left behind.
+func (r *Repo) setOrigin(ctx context.Context) error {
+	have, err := r.git(ctx, "remote", "get-url", "origin")
+	if err != nil {
+		// No origin at all, which a checkout over made always has;
+		// this one has been interfered with, or predates it.
+		_, err := r.git(ctx, "remote", "add", "origin", r.url)
+		return err
+	}
+	if have == r.url {
+		return nil
+	}
+	_, err = r.git(ctx, "remote", "set-url", "origin", r.url)
+	return err
 }
 
 // Dir returns the checkout's directory.

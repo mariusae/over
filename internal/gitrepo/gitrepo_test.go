@@ -344,3 +344,41 @@ func TestShow(t *testing.T) {
 		t.Error("Resolve of a bad revision succeeded")
 	}
 }
+
+// TestOpenFollowsTheURL checks that a checkout already in the cache is
+// pointed at the URL over currently means to use. The default scheme can
+// change under it, and the cache is over's to keep current.
+func TestOpenFollowsTheURL(t *testing.T) {
+	ctx := context.Background()
+	url := newRemote(t)
+	dir := filepath.Join(t.TempDir(), "checkout")
+	if _, err := Open(ctx, dir, url); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopening at a different URL moves the remote rather than
+	// leaving the checkout pointed at the old one.
+	moved := newRemote(t)
+	r, err := Open(ctx, dir, moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.git(ctx, "remote", "get-url", "origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != moved {
+		t.Errorf("origin = %q, want %q", got, moved)
+	}
+
+	// A checkout whose origin has been removed gets one back.
+	if _, err := r.git(ctx, "remote", "remove", "origin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(ctx, dir, moved); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := r.git(ctx, "remote", "get-url", "origin"); err != nil || got != moved {
+		t.Errorf("origin = %q, %v", got, err)
+	}
+}

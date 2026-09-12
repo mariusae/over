@@ -41,8 +41,8 @@ type Options struct {
 	// Cache is the directory repository checkouts are kept in.
 	Cache string
 
-	// URL returns the git URL of a repository. It defaults to HTTPS on
-	// the spec's host.
+	// URL returns the git URL of a repository. It defaults to
+	// [DefaultURL], which is SSH on the spec's host.
 	URL func(spec.Spec) string
 }
 
@@ -81,9 +81,13 @@ func Open(opts Options) (*Over, error) {
 	return o, nil
 }
 
-// DefaultURL returns the HTTPS git URL of a repository.
+// DefaultURL returns the SSH git URL of a repository. SSH is the
+// default because it needs nothing over cannot supply: the user's agent
+// or key answers for it, where HTTPS wants a credential helper and,
+// failing that, a password over has no way to ask for. $OVER_URL
+// overrides it.
 func DefaultURL(s spec.Spec) string {
-	return fmt.Sprintf("https://%s/%s/%s.git", s.Host, s.Owner, s.Repo)
+	return fmt.Sprintf("git@%s:%s/%s.git", s.Host, s.Owner, s.Repo)
 }
 
 // Home returns the configuration directory.

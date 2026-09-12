@@ -49,8 +49,11 @@ func dirFromEnv(override, base, fallback string) (string, error) {
 }
 
 // urlFunc returns the function mapping a layer's repository to a git
-// URL. $OVER_URL overrides the default; it is a format string taking the
-// host, owner, and repository as %[1]s, %[2]s, and %[3]s.
+// URL. The default is SSH, which works wherever the user's own git
+// does. $OVER_URL overrides it; it is a format string taking the host,
+// owner, and repository as %[1]s, %[2]s, and %[3]s, so HTTPS is
+//
+//	OVER_URL='https://%[1]s/%[2]s/%[3]s.git'
 func urlFunc() func(spec.Spec) string {
 	tmpl := os.Getenv("OVER_URL")
 	if tmpl == "" {

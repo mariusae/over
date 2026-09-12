@@ -323,7 +323,16 @@ wherever a layer name is expected:
 	OVER_CACHE    the repository cache directory
 	OVER_URL      a format string for repository URLs, taking the host,
 	              owner, and repository as %[1]s, %[2]s, and %[3]s;
-	              the default is https://%[1]s/%[2]s/%[3]s.git
+	              the default is git@%[1]s:%[2]s/%[3]s.git
+
+over reaches its repositories over SSH, which needs nothing it cannot
+supply: the user's agent or key answers for it. HTTPS wants a credential
+helper, and over has no way to ask for a password. To use it anyway:
+
+	OVER_URL='https://%[1]s/%[2]s/%[3]s.git'
+
+A checkout already in the cache is pointed at the current URL the next
+time over opens it, so changing this does not strand what is there.
 
 ## Building
 
