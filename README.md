@@ -8,14 +8,14 @@ line plumbing.
 
 ## Building
 
-	make build     # writes ./over
-	make test
-	make lint
+	go build ./cmd/over     # writes ./over
+	go install ./cmd/over   # writes $GOBIN/over
 
-Or with the Go tool directly:
+## Testing
 
-	go build ./cmd/over
 	go test ./...
+	go vet ./...
+	gofmt -l .              # prints files that need formatting; silence is good
 
 ## Layout
 

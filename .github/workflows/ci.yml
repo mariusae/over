@@ -15,13 +15,7 @@ jobs:
           go-version: '1.24'
           cache: true
       - name: Check formatting
-        run: |
-          out=$(gofmt -l .)
-          if [ -n "$out" ]; then
-            echo "These files are not gofmt'd:"
-            echo "$out"
-            exit 1
-          fi
+        run: gofmt -l . && test -z "$(gofmt -l .)"
       - name: Vet
         run: go vet ./...
       - name: Test
