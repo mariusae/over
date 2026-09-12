@@ -35,9 +35,19 @@ else receives it, so over does not guess: the layer must be one that is
 already configured, and every path must lie under its root. Files that
 over already tracks are left as they are.
 
+A path argument with a wildcard in it names no particular file, so it is
+recorded as a tracking rule rather than expanded once:
+
+	over track mariusae/config:editors .config/ion/...
+
+The layer then claims everything under .config/ion, including files made
+later, on every machine that adds it. Use "over rule" to see a layer's
+rules, to take one back, or to add the ignore rules that carve exceptions
+out of it.
+
 Track is the counterpart of sync's other direction: sync discovers new
 files in a layer by itself, but a new local file is only over's business
-once it has been tracked.
+once it has been tracked or claimed.
 ` + pathArgs,
 	Run: runTrack,
 }
@@ -66,11 +76,49 @@ func runTrack(ctx context.Context, env *Env, args []string) error {
 		return fmt.Errorf("%s: not a configured layer; run 'over status' for the list", layerArg)
 	}
 
-	matched, err := walkArgs(env.Dir, paths)
+	// A wildcard names no particular file, so it becomes a rule; a
+	// plain path names one, and is tracked as it stands.
+	var rules, named []string
+	var rulePats []pathspec.Pattern
+	for _, arg := range paths {
+		pat, err := pathspec.Parse(env.Dir, arg)
+		if err != nil {
+			return err
+		}
+		if !pat.Wild() {
+			named = append(named, arg)
+			continue
+		}
+		rule, err := over.RelativeRule(l, pat)
+		if err != nil {
+			return err
+		}
+		rules = append(rules, rule)
+		rulePats = append(rulePats, pat)
+	}
+
+	var n int
+	if len(rules) > 0 {
+		added, err := o.Rules(ctx, l.Spec, over.RuleTrack, rules, false, over.LocalOrigin(Version()))
+		if err != nil {
+			return err
+		}
+		for _, rule := range added {
+			env.Printf("%s tracked in %s (rule, %s)\n", rule, l, plural(ruleMatches(l, rulePats), "file"))
+		}
+		n += len(added)
+	}
+	if len(named) == 0 {
+		if n == 0 {
+			return fmt.Errorf("%s: nothing new to track in %s", strings.Join(paths, " "), l)
+		}
+		return over.SaveStates(layers)
+	}
+
+	matched, err := walkArgs(env.Dir, named)
 	if err != nil {
 		return err
 	}
-	var n int
 	for _, path := range matched {
 		rel, err := filepath.Rel(l.Root, path)
 		if err != nil {
@@ -101,6 +149,18 @@ func runTrack(ctx context.Context, env *Env, args []string) error {
 	return over.SaveStates(layers)
 }
 
+// ruleMatches counts the local files a set of new rules claims right
+// now. A rule that matches nothing is usually a rule with a typo in it,
+// and saying so is cheaper than waiting for the sync that does nothing.
+func ruleMatches(l *over.Layer, pats []pathspec.Pattern) int {
+	probe := &over.Layer{Root: l.Root, Exclude: l.Exclude, Track: pats, Ignore: l.Ignore}
+	claimed, err := probe.ClaimedPaths()
+	if err != nil {
+		return 0
+	}
+	return len(claimed)
+}
+
 var untrackCmd = &Command{
 	Name:  "untrack",
 	Usage: "untrack <path>...",
@@ -128,6 +188,12 @@ func runUntrack(ctx context.Context, env *Env, args []string) error {
 		}
 		over.Untrack(c.Layer, c.Path)
 		env.Printf("%s untracked in %s\n", over.RelTo(env.Dir, c.Local), c.Layer)
+		if c.Claimed {
+			// Untracking is a one-time edit; a rule is standing, and
+			// will claim the file straight back.
+			env.Printf("\ta rule still claims it; carve it out with 'over rule -ignore %s %s'\n",
+				c.Layer, over.RelTo(env.Dir, c.Local))
+		}
 		n++
 	}
 	if n == 0 {

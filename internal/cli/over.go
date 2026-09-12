@@ -141,6 +141,10 @@ func describe(env *Env, c *over.Change) (string, bool) {
 	case over.PullDelete:
 		return fmt.Sprintf("%s deleted from %s", path, c.Layer), true
 	case over.Push:
+		if c.Base == nil {
+			// Nobody named this one: a tracking rule claimed it.
+			return fmt.Sprintf("%s to %s (claimed)", path, c.Layer), true
+		}
 		return fmt.Sprintf("%s to %s", path, c.Layer), true
 	case over.PushDelete:
 		return fmt.Sprintf("%s deleted in %s", path, c.Layer), true

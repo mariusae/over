@@ -123,6 +123,20 @@ func (p Pattern) Path() (string, bool) {
 	return p.parts[0], true
 }
 
+// Abs returns the absolute pattern the argument resolved to, with the
+// wildcards written back in. It is how a pattern is stored and passed
+// around once it has been parsed.
+func (p Pattern) Abs() string {
+	if p.all {
+		return "..."
+	}
+	return strings.Join(p.parts, "...")
+}
+
+// Wild reports whether the pattern contains a wildcard, and so names an
+// open-ended set of files rather than one place.
+func (p Pattern) Wild() bool { return !p.dir }
+
 // Base returns the directory the pattern is anchored to: the longest
 // literal prefix of the pattern that names a directory. It is the place
 // to start a file system walk that could match. Base returns the empty

@@ -105,6 +105,19 @@ type RepoLayer struct {
 	// Root is the directory the layer is materialized under, subject
 	// to environment variable expansion. It defaults to "$HOME".
 	Root string `yaml:"root,omitempty"`
+
+	// Track holds the layer's tracking rules: patterns, relative to
+	// the layer's root, naming the local files the layer claims. A
+	// file matching one of them is written to the layer even though
+	// nobody named it, which is what makes a layer a standing
+	// arrangement rather than a list.
+	Track []string `yaml:"track,omitempty"`
+
+	// Ignore holds patterns the layer will not claim, whatever Track
+	// says. It is the counterweight to Track, and applies only to
+	// claiming: a file the layer already holds is still synced, since
+	// somebody published it deliberately.
+	Ignore []string `yaml:"ignore,omitempty"`
 }
 
 // LoadRepo reads a repository configuration from path. A missing file
@@ -131,6 +144,12 @@ func (r *Repo) Root(name string) string {
 	}
 	return "$HOME"
 }
+
+// Track returns the named layer's tracking rules.
+func (r *Repo) Track(name string) []string { return r.Layers[name].Track }
+
+// Ignore returns the patterns the named layer will not claim.
+func (r *Repo) Ignore(name string) []string { return r.Layers[name].Ignore }
 
 // Set returns the members of the named set, and whether it exists.
 func (r *Repo) Set(name string) ([]string, bool) {

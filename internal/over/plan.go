@@ -107,6 +107,11 @@ type Change struct {
 	// has never been synced.
 	Base *state.File
 
+	// Claimed reports that the layer's tracking rules claim the file,
+	// so that a local file the layer does not yet hold is written to
+	// it without anyone naming it. See [Layer.Claims].
+	Claimed bool
+
 	// Owner reports whether this layer is the one that owns the file:
 	// the last layer providing it. Only the owner's change is applied;
 	// the others are shadowed.
@@ -133,7 +138,14 @@ func Plan(layers []*Layer) ([]Change, error) {
 		if err != nil {
 			return nil, err
 		}
+		claimed, err := l.ClaimedPaths()
+		if err != nil {
+			return nil, err
+		}
 		paths := map[string]bool{}
+		for _, p := range claimed {
+			paths[p] = true
+		}
 		for p := range remote {
 			paths[p] = true
 		}
@@ -157,6 +169,7 @@ func Plan(layers []*Layer) ([]Change, error) {
 				RemoteTombstone: l.Tombstones.Has(p),
 				Base:            l.State.Get(p),
 			}
+			c.Claimed = l.Claims(c.Local)
 			info, err := os.Lstat(c.Local)
 			switch {
 			case os.IsNotExist(err):
@@ -210,6 +223,10 @@ func classify(c *Change) Status {
 			return Adopt
 		case remote && local:
 			return Conflict
+		case local && c.Claimed:
+			// The layer does not hold the file, but its rules claim
+			// it. Nobody had to name this one.
+			return Push
 		default:
 			// The layer does not provide the file, so it is not ours.
 			return Unchanged
@@ -268,7 +285,7 @@ func shadow(changes []Change) {
 		if !ok {
 			o = owner{provider: -1, known: -1}
 		}
-		provides := c.RemotePresent() || (c.Base != nil && !c.Base.Deleted)
+		provides := c.RemotePresent() || c.Claimed || (c.Base != nil && !c.Base.Deleted)
 		if provides && (o.provider < 0 || changes[o.provider].Layer.Index < c.Layer.Index) {
 			o.provider = i
 		}

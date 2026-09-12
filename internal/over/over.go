@@ -213,6 +213,12 @@ type Layer struct {
 	// whatever its root.
 	Exclude []pathspec.Pattern
 
+	// Track and Ignore are the layer's tracking rules, parsed against
+	// its root: the local files it claims, and those it will not.
+	// See [Layer.Claims].
+	Track  []pathspec.Pattern
+	Ignore []pathspec.Pattern
+
 	tombPath string
 }
 
@@ -285,6 +291,14 @@ func (o *Over) Layers(ctx context.Context, update bool) ([]*Layer, error) {
 			return nil, err
 		}
 		st.Root = root
+		track, err := ParseRules(root, rc.Track(s.Name))
+		if err != nil {
+			return nil, fmt.Errorf("%s: track: %w", s, err)
+		}
+		ignore, err := ParseRules(root, rc.Ignore(s.Name))
+		if err != nil {
+			return nil, fmt.Errorf("%s: ignore: %w", s, err)
+		}
 		tombPath := filepath.Join(repo.Dir(), s.Name+".tombstones.yaml")
 		tombs, err := config.LoadTombstones(tombPath)
 		if err != nil {
@@ -293,6 +307,8 @@ func (o *Over) Layers(ctx context.Context, update bool) ([]*Layer, error) {
 		layers = append(layers, &Layer{
 			Spec:       s,
 			Exclude:    exclusions,
+			Track:      track,
+			Ignore:     ignore,
 			Root:       root,
 			Index:      i,
 			Repo:       repo,

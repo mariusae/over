@@ -207,6 +207,51 @@ sync publishes them. The layer's history keeps both, and the commit that
 publishes the restore says that is what it was. To undo a local edit
 without reaching into the history, use `over reset`.
 
+## Tracking rules
+
+Naming files one at a time gets old. A layer can instead say which files
+it claims, and a wildcard in `over track` writes that rule rather than
+expanding once:
+
+	$ over track mariusae/env:apex .apex/...
+	.apex/... tracked in mariusae/env:apex (rule, 2 files)
+	$ over sync
+	.apex/attach to mariusae/env:apex (claimed)
+	.apex/profile to mariusae/env:apex (claimed)
+
+A file put there later is claimed too, on this machine and on every other
+that adds the layer — rules live with the layer, in its repository, and
+are written relative to its root so they mean the same thing everywhere.
+A plain path still tracks just that file.
+
+Rules bear on **claiming only**, which is the direction that is
+otherwise hard. What a layer holds is what a layer holds: a file already
+in it keeps syncing whatever the rules say, because somebody published
+it deliberately.
+
+`ignore` rules are the counterweight:
+
+	$ over rule -ignore mariusae/env:apex .apex/cache/...
+	$ over rule mariusae/env:apex
+	track   .apex/...
+	ignore  .apex/cache/...
+
+Three things narrow what a layer takes, and they are not the same thing:
+
+| | scope | direction | lives in |
+|---|---|---|---|
+| `over exclude` | every layer | both — a hard veto | your config |
+| layer `ignore` | one layer | claiming only | the layer |
+| layer `track` | one layer | claiming only | the layer |
+
+Because a rule is standing, `over untrack` cannot win against one — the
+next sync claims the file straight back. Untrack says so, and points at
+the `ignore` rule that would settle it.
+
+Worth knowing: a rule means new files under it are published without
+your naming them. `over status` and `over sync -n` show what is claimed
+before it goes, and claimed files are marked in sync's output.
+
 ## Exclusions
 
 Some paths should never be overlay content, whatever a layer's root.
@@ -263,6 +308,7 @@ elements:
 	over ack <path>...
 	over track <layer> <path>...
 	over untrack <path>...
+	over rule [-ignore] [-rm] <layer> [pattern...]
 	over exclude [-rm] [path...]
 
 Run `over help <command>` for the details of any of them.

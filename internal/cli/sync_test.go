@@ -154,7 +154,7 @@ func TestTrack(t *testing.T) {
 	c.mustOver("sync")
 	c.write(".config/ion/config", "plugin = 1\n")
 
-	out := c.mustOver("track", "mariusae/config:editors", ".config/...")
+	out := c.mustOver("track", "mariusae/config:editors", ".config/ion/config")
 	if !strings.Contains(out, ".config/ion/config tracked in mariusae/config:editors") {
 		t.Errorf("track output = %q", out)
 	}
@@ -213,16 +213,25 @@ func TestTrackRefusesOutsideTheRoot(t *testing.T) {
 }
 
 // TestTrackRefusesOverOwnHome checks that over never manages its own
-// configuration, which would otherwise churn on every sync.
+// configuration, which would otherwise churn on every sync. It holds for
+// a file named outright and for one a rule would otherwise claim.
 func TestTrackRefusesOverOwnHome(t *testing.T) {
 	c, _ := newLayer(t)
 	c.mustOver("sync")
-	code, _, stderr := c.over("track", "mariusae/config:editors", ".config/...")
+	code, _, stderr := c.over("track", "mariusae/config:editors", ".config/over/config.yaml")
 	if code != exitError {
 		t.Errorf("exit %d, want %d (stderr %q)", code, exitError, stderr)
 	}
 	if !strings.Contains(stderr, "nothing new to track") {
 		t.Errorf("stderr = %q", stderr)
+	}
+
+	// A rule covering over's own home claims nothing from it.
+	if out := c.mustOver("track", "mariusae/config:editors", ".config/..."); !strings.Contains(out, "0 files") {
+		t.Errorf("a rule over over's own home claimed something: %q", out)
+	}
+	if out := c.mustOver("sync"); strings.Contains(out, ".config/over") {
+		t.Errorf("sync took over's own files:\n%s", out)
 	}
 }
 
