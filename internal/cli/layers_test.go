@@ -227,3 +227,111 @@ func TestStatusDoesNotFetch(t *testing.T) {
 		t.Errorf("sync = %q", out)
 	}
 }
+
+// TestStatusAll checks the full inventory: every file over is looking
+// after, not only the ones a sync would act on.
+func TestStatusAll(t *testing.T) {
+	c := newClient(t)
+	r := c.newRepo("mariusae", "config")
+	r.write("editors/.emacs", "emacs\n")
+	r.write("editors/.zshrc", "zsh\n")
+	r.write("editors/.config/ion/config", "ion\n")
+	r.commit("init")
+	c.mustOver("add", "mariusae/config:editors")
+	c.mustOver("sync")
+	c.write(".zshrc", "edited\n")
+
+	// Without -a, only the file with something to do.
+	plain := c.mustOver("status")
+	if !strings.Contains(plain, ".zshrc to mariusae/config:editors") {
+		t.Errorf("status = %q", plain)
+	}
+	for _, quiet := range []string{".emacs", ".config/ion/config"} {
+		if strings.Contains(plain, quiet) {
+			t.Errorf("status named %q, which nothing is happening to:\n%s", quiet, plain)
+		}
+	}
+
+	// With it, everything.
+	all := c.mustOver("status", "-a")
+	for _, want := range []string{
+		".emacs unchanged in mariusae/config:editors",
+		".config/ion/config unchanged in mariusae/config:editors",
+		".zshrc to mariusae/config:editors",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("status -a missing %q:\n%s", want, all)
+		}
+	}
+	// The summary is the same either way; -a changes what is listed,
+	// not what is counted.
+	if !strings.Contains(plain, "1 written, 2 unchanged") || !strings.Contains(all, "1 written, 2 unchanged") {
+		t.Errorf("summaries differ:\n%s\n%s", plain, all)
+	}
+}
+
+// TestStatusAllListsEachFileOnce checks that a file held by two layers is
+// listed under the one that owns it, rather than once per layer.
+func TestStatusAllListsEachFileOnce(t *testing.T) {
+	c := newClient(t)
+	base := c.newRepo("mariusae", "config")
+	base.write("editors/.emacs", "same\n")
+	base.commit("init")
+	work := c.newRepo("mariusae", "work")
+	work.write("overrides/.emacs", "same\n")
+	work.commit("init")
+	c.mustOver("add", "mariusae/config:editors")
+	c.mustOver("add", "mariusae/work:overrides")
+	c.mustOver("sync")
+
+	out := c.mustOver("status", "-a")
+	if n := strings.Count(out, ".emacs unchanged"); n != 1 {
+		t.Errorf(".emacs listed %d times, want once:\n%s", n, out)
+	}
+	if !strings.Contains(out, ".emacs unchanged in mariusae/work:overrides") {
+		t.Errorf("the owning layer does not speak for the file:\n%s", out)
+	}
+}
+
+// TestStatusAllTakesPaths checks that -a is still bounded by the path
+// arguments.
+func TestStatusAllTakesPaths(t *testing.T) {
+	c := newClient(t)
+	r := c.newRepo("mariusae", "config")
+	r.write("editors/.emacs", "emacs\n")
+	r.write("editors/.config/ion/config", "ion\n")
+	r.commit("init")
+	c.mustOver("add", "mariusae/config:editors")
+	c.mustOver("sync")
+
+	out := c.mustOver("status", "-a", ".config/...")
+	if !strings.Contains(out, ".config/ion/config unchanged") {
+		t.Errorf("status -a .config/... = %q", out)
+	}
+	if strings.Contains(out, ".emacs unchanged") {
+		t.Errorf("status -a ignored its path argument:\n%s", out)
+	}
+}
+
+// TestStatusAllOmitsWhatIsNotOurs checks that a tombstoned path with an
+// untracked local file is not passed off as tracked.
+func TestStatusAllOmitsWhatIsNotOurs(t *testing.T) {
+	c, r := newLayer(t)
+	c.mustOver("sync")
+	if err := removeFile(c.path(".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+	c.mustOver("sync") // tombstones it in the layer
+	r.pull()
+	if !strings.Contains(r.read("editors.tombstones.yaml"), ".zshrc") {
+		t.Fatal("the file was not tombstoned")
+	}
+	// A local file reappears, but over has no claim on it.
+	c.mustOver("untrack", ".zshrc")
+	c.write(".zshrc", "mine now\n")
+
+	out := c.mustOver("status", "-a")
+	if strings.Contains(out, ".zshrc") {
+		t.Errorf("status -a claimed a file that is not over's:\n%s", out)
+	}
+}

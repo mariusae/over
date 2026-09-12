@@ -166,6 +166,20 @@ func hintPath(paths []string) string {
 	return "<path>"
 }
 
+// describeTracked renders a change for a full listing, where the files
+// nothing is happening to are named too. Only the layer that owns a file
+// speaks for it, so that each file appears once however many layers hold
+// it.
+func describeTracked(env *Env, c *over.Change) (string, bool) {
+	if line, ok := describe(env, c); ok {
+		return line, true
+	}
+	if !c.Owner || !c.Tracked() {
+		return "", false
+	}
+	return fmt.Sprintf("%s unchanged in %s", over.RelTo(env.Dir, c.Local), c.Layer), true
+}
+
 // summarize renders the count line that ends sync and status.
 func summarize(n over.Counts) string {
 	var parts []string

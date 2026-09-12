@@ -118,6 +118,14 @@ type Change struct {
 	Owner bool
 }
 
+// Tracked reports whether the file is one over is looking after in this
+// layer: the layer holds it, claims it, or recorded it at the last sync.
+// A path the layer knows only as a tombstone, or a local file that is
+// nobody's, is not.
+func (c *Change) Tracked() bool {
+	return c.RemotePresent() || c.Claimed || (c.Base != nil && !c.Base.Deleted)
+}
+
 // RepoFile returns the file's path within its layer's repository, which
 // is how git names it.
 func (c *Change) RepoFile() string { return c.Layer.Spec.Name + "/" + c.Path }

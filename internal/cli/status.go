@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"text/tabwriter"
 
@@ -12,19 +13,30 @@ func init() {
 	Register(statusCmd)
 }
 
+var statusFlagAll bool
+
 var statusCmd = &Command{
 	Name:  "status",
-	Usage: "status [path...]",
+	Usage: "status [-a] [path...]",
 	Short: "show the layers and what sync would do",
 	Long: `Status lists the configured layers in order, lowest
 precedence first, and then every file that a sync would act on: the
 conflicts, the files whose layer has moved ahead, and the local changes
 waiting to be written back.
 
+The -a flag lists every file over is looking after, including the ones
+nothing is happening to, which is the inventory of what the layers hold
+on this machine. A file held by more than one layer is listed once,
+under the layer that owns it; the layers it shadows are reported
+separately, as they are without -a.
+
 Status works from the layers already in over's cache; it does not fetch.
-Run "over sync -n" to see the same report against freshly fetched
-layers.
+Run "over fetch" first, or "over sync -n", to see the same report against
+the layers as they are now.
 ` + pathArgs,
+	Flags: func(fs *flag.FlagSet) {
+		fs.BoolVar(&statusFlagAll, "a", false, "list every tracked file, not only the ones sync would act on")
+	},
 	Run: runStatus,
 }
 
@@ -44,9 +56,13 @@ func runStatus(ctx context.Context, env *Env, args []string) error {
 	}
 	tw.Flush()
 
+	describeOne := describe
+	if statusFlagAll {
+		describeOne = describeTracked
+	}
 	var any bool
 	for i := range s.Changes {
-		line, ok := describe(env, &s.Changes[i])
+		line, ok := describeOne(env, &s.Changes[i])
 		if !ok {
 			continue
 		}

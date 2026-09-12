@@ -23,6 +23,19 @@ to its layer:
 	.zshrc to mariusae/config:editors
 	1 updated, 1 written, 13 unchanged
 
+`over status -a` lists every file over is looking after, not only the
+ones a sync would act on — the inventory of what the layers hold on this
+machine:
+
+	$ over status -a
+	.apex/attach unchanged in mariusae/env:apex
+	.apex/profile unchanged in mariusae/env:apex
+	.emacs unchanged in mariusae/config:editors
+	.zshrc to mariusae/config:editors
+
+A file held by more than one layer is listed under the layer that owns
+it, once.
+
 `over fetch` updates over's copy of the layers without writing anything,
 so that the status you read is the one you are about to act on:
 
@@ -299,7 +312,7 @@ elements:
 	over root <layer> [dir]
 	over fetch
 	over sync [-n] [path...]
-	over status [path...]
+	over status [-a] [path...]
 	over show <path>...
 	over diff [path...]
 	over log [-n count] <path>...
