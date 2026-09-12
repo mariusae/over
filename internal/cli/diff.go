@@ -17,9 +17,18 @@ var diffCmd = &Command{
 	Usage: "diff [path...]",
 	Short: "show how local files differ from their layers",
 	Long: `Diff writes a unified diff of every file whose local
-contents differ from the copy in the layer that owns it. The local file
-is the left side, so the lines marked "+" are what the layer holds and a
-reset would install.
+contents differ from the copy in the layer that owns it.
+
+The diff runs the way the sync would: what over would replace on the
+left, what it would put there on the right. For a file the layer has
+moved ahead of, that is the local file against the layer's copy; for a
+local change waiting to be written back, it is the other way about. The
+lines marked "+" are the ones that would end up in the file over is
+about to write, whichever file that is.
+
+A conflict is shown as the push it is not yet allowed to be: the layer's
+copy on the left, the local file competing with it on the right. "over
+reset" takes the left, "over ack" takes the right.
 
 With no arguments diff covers every tracked file; conflicts are the usual
 reason to run it.
@@ -53,8 +62,24 @@ func runDiff(ctx context.Context, env *Env, args []string) error {
 		if err != nil {
 			return err
 		}
+		// The diff runs the way the sync would: what over would
+		// replace on the left, what it would put there on the right,
+		// so that the lines marked "+" are the ones that would end up
+		// in the file over is about to write.
 		path := over.RelTo(env.Dir, c.Local)
-		text := diff.Unified(path+" (local)", path+" ("+c.Layer.String()+")", local, remote)
+		var from, to string
+		var before, after []byte
+		switch c.Status {
+		case over.Pull, over.PullDelete:
+			from, before = path+" (local)", local
+			to, after = path+" ("+c.Layer.String()+")", remote
+		default:
+			// A push, or a conflict, which is a push that over will
+			// not make until it is told which side wins.
+			from, before = path+" ("+c.Layer.String()+")", remote
+			to, after = path+" (local)", local
+		}
+		text := diff.Unified(from, to, before, after)
 		if text == "" {
 			continue
 		}

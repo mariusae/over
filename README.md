@@ -64,11 +64,18 @@ is a conflict on the very first sync.
 Look at the difference, then resolve it in one direction or the other:
 
 	$ over diff
-	--- .emacs (local)
-	+++ .emacs (mariusae/config:editors)
+	--- .emacs (mariusae/config:editors)
+	+++ .emacs (local)
 	@@ -1 +1 @@
-	-(setq visible-bell t)
-	+(setq inhibit-startup-message nil)
+	-(setq inhibit-startup-message nil)
+	+(setq visible-bell t)
+
+The diff runs the way the sync would: what over would replace on the
+left, what it would put there on the right. So the lines marked `+` are
+always the ones that would end up in the file over is about to write —
+the layer's copy for a local change on its way out, the local file for a
+layer that has moved ahead. A conflict is shown as the push it is not
+yet allowed to be.
 
 	$ over reset .emacs    # take the layer's copy, discarding the local one
 	$ over ack .emacs      # keep the local copy; the next sync writes it to the layer

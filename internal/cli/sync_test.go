@@ -74,8 +74,11 @@ func TestConflictResetTakesTheLayer(t *testing.T) {
 		t.Errorf("sync output = %q", out)
 	}
 
+	// A conflict is shown as the push it is not yet allowed to be: the
+	// layer's copy on the left, the local file competing with it on
+	// the right.
 	diff := c.mustOver("diff")
-	for _, want := range []string{"--- .emacs (local)", "+++ .emacs (mariusae/config:editors)", "-local", "+remote"} {
+	for _, want := range []string{"--- .emacs (mariusae/config:editors)", "+++ .emacs (local)", "-remote", "+local"} {
 		if !strings.Contains(diff, want) {
 			t.Errorf("diff output missing %q:\n%s", want, diff)
 		}
@@ -313,5 +316,58 @@ func TestIrregularLocalFile(t *testing.T) {
 	}
 	if out := c.mustOver("diff"); !strings.Contains(out, "not a regular file") {
 		t.Errorf("diff = %q", out)
+	}
+}
+
+// TestDiffRunsTheWayTheSyncWould checks the direction of the diff. What
+// over would replace is on the left and what it would put there is on
+// the right, so the lines marked "+" are the ones that would end up in
+// the file over is about to write -- whichever file that is.
+func TestDiffRunsTheWayTheSyncWould(t *testing.T) {
+	c, r := newLayer(t)
+	c.mustOver("sync")
+
+	// A local change: sync would write it to the layer, so the layer's
+	// copy is the left side and the local addition is a "+".
+	c.write(".zshrc", "set -o vi\nexport EDITOR=emacs\n")
+	if out := c.mustOver("status"); !strings.Contains(out, ".zshrc to mariusae/config:editors") {
+		t.Fatalf("status = %q", out)
+	}
+	out := c.mustOver("diff")
+	for _, want := range []string{
+		"--- .zshrc (mariusae/config:editors)",
+		"+++ .zshrc (local)",
+		"+export EDITOR=emacs",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff of a local change missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "-export EDITOR=emacs") {
+		t.Errorf("diff of a local change reads as a removal:\n%s", out)
+	}
+	c.mustOver("sync")
+
+	// A layer change: sync would write it locally, so the local file is
+	// the left side and the layer's addition is a "+".
+	r.pull()
+	r.write("editors/.zshrc", "set -o vi\nexport EDITOR=emacs\nsetopt autocd\n")
+	r.commit("remote edit")
+	c.mustOver("fetch")
+	if out := c.mustOver("status"); !strings.Contains(out, ".zshrc from mariusae/config:editors") {
+		t.Fatalf("status = %q", out)
+	}
+	out = c.mustOver("diff")
+	for _, want := range []string{
+		"--- .zshrc (local)",
+		"+++ .zshrc (mariusae/config:editors)",
+		"+setopt autocd",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("diff of a layer change missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "-setopt autocd") {
+		t.Errorf("diff of a layer change reads as a removal:\n%s", out)
 	}
 }
