@@ -208,3 +208,64 @@ func revisionOf(t *testing.T, c *client, path string, fromOldest int) string {
 	}
 	return revs[len(revs)-1-fromOldest]
 }
+
+// TestLogHintPrintedOnce checks that the trailing hint belongs to the
+// command, not to each path the arguments expanded to.
+func TestLogHintPrintedOnce(t *testing.T) {
+	c, _ := newLayer(t)
+	c.mustOver("sync")
+	c.write(".apex/attach", "attach\n")
+	c.write(".apex/profile", "profile\n")
+	c.mustOver("track", "mariusae/config:editors", ".apex/...")
+	c.mustOver("sync")
+
+	out := c.mustOver("log", ".apex/...")
+	if n := strings.Count(out, "restore an earlier version"); n != 1 {
+		t.Errorf("hint printed %d times, want once:\n%s", n, out)
+	}
+	// It cannot name one path when it covers several.
+	if !strings.Contains(out, "over restore <revision> <path>") {
+		t.Errorf("hint does not generalize:\n%s", out)
+	}
+	// Both histories are still reported.
+	for _, want := range []string{".apex/attach", ".apex/profile"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log output missing %q:\n%s", want, out)
+		}
+	}
+
+	// With one path there is no reason not to name it.
+	out = c.mustOver("log", ".apex/attach")
+	if !strings.Contains(out, "over restore <revision> .apex/attach") {
+		t.Errorf("hint for a single path = %q", out)
+	}
+}
+
+// TestUntrackNotePrintedOnce checks the same for the note untrack leaves
+// when a rule will claim the files straight back.
+func TestUntrackNotePrintedOnce(t *testing.T) {
+	c, _ := newLayer(t)
+	c.mustOver("sync")
+	c.write(".apex/attach", "attach\n")
+	c.write(".apex/profile", "profile\n")
+	c.mustOver("track", "mariusae/config:editors", ".apex/...")
+	c.mustOver("sync")
+
+	out := c.mustOver("untrack", ".apex/...")
+	if n := strings.Count(out, "carve"); n != 1 {
+		t.Errorf("note printed %d times, want once:\n%s", n, out)
+	}
+	if !strings.Contains(out, "2 files still claimed by a rule") {
+		t.Errorf("note does not say how many:\n%s", out)
+	}
+	// The layer is still named, since they all share one.
+	if !strings.Contains(out, "over rule -ignore mariusae/config:editors <pattern>") {
+		t.Errorf("note does not name the layer:\n%s", out)
+	}
+	// Each file is still reported individually.
+	for _, want := range []string{".apex/attach untracked", ".apex/profile untracked"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("untrack output missing %q:\n%s", want, out)
+		}
+	}
+}

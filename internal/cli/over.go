@@ -156,6 +156,16 @@ func describe(env *Env, c *over.Change) (string, bool) {
 	return "", false
 }
 
+// hintPath names the path a trailing hint should use. A hint is printed
+// once for the whole command, however many paths the arguments expanded
+// to, so it can only name one when there was only one.
+func hintPath(paths []string) string {
+	if len(paths) == 1 {
+		return paths[0]
+	}
+	return "<path>"
+}
+
 // summarize renders the count line that ends sync and status.
 func summarize(n over.Counts) string {
 	var parts []string

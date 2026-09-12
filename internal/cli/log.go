@@ -66,20 +66,28 @@ func runLog(ctx context.Context, env *Env, args []string) error {
 	}
 	sort.Strings(paths)
 
+	var reported []string
 	for i, local := range paths {
 		if i > 0 {
 			env.Printf("\n")
 		}
-		if err := logPath(ctx, env, local, byPath[local]); err != nil {
+		found, err := logPath(ctx, env, local, byPath[local])
+		if err != nil {
 			return err
 		}
+		if found {
+			reported = append(reported, over.RelTo(env.Dir, local))
+		}
+	}
+	if len(reported) > 0 {
+		env.Printf("\nrestore an earlier version with 'over restore <revision> %s'\n", hintPath(reported))
 	}
 	return nil
 }
 
 // logPath writes the history of one file, a block per layer that holds
-// any, highest precedence first.
-func logPath(ctx context.Context, env *Env, local string, changes []*over.Change) error {
+// any, highest precedence first. It reports whether there was any.
+func logPath(ctx context.Context, env *Env, local string, changes []*over.Change) (bool, error) {
 	sort.Slice(changes, func(i, j int) bool {
 		return changes[i].Layer.Index > changes[j].Layer.Index
 	})
@@ -89,7 +97,7 @@ func logPath(ctx context.Context, env *Env, local string, changes []*over.Change
 	for _, c := range changes {
 		commits, err := c.Layer.Repo.Log(ctx, c.RepoFile(), logFlagN)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if len(commits) == 0 {
 			continue
@@ -105,15 +113,13 @@ func logPath(ctx context.Context, env *Env, local string, changes []*over.Change
 				short(commit.Hash), stamp(commit.Date), origin, action, commit.Subject)
 		}
 		if err := tw.Flush(); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if !found {
 		env.Printf("%s  (no history in any layer)\n", name)
-		return nil
 	}
-	env.Printf("\nrestore an earlier version with 'over restore <revision> %s'\n", name)
-	return nil
+	return found, nil
 }
 
 // describeCommit renders where a commit came from and what it did to the

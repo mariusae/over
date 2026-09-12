@@ -181,6 +181,7 @@ func runUntrack(ctx context.Context, env *Env, args []string) error {
 		return err
 	}
 	var n int
+	var claimed []*over.Change
 	for i := range s.Changes {
 		c := &s.Changes[i]
 		if c.Base == nil {
@@ -189,17 +190,40 @@ func runUntrack(ctx context.Context, env *Env, args []string) error {
 		over.Untrack(c.Layer, c.Path)
 		env.Printf("%s untracked in %s\n", over.RelTo(env.Dir, c.Local), c.Layer)
 		if c.Claimed {
-			// Untracking is a one-time edit; a rule is standing, and
-			// will claim the file straight back.
-			env.Printf("\ta rule still claims it; carve it out with 'over rule -ignore %s %s'\n",
-				c.Layer, over.RelTo(env.Dir, c.Local))
+			claimed = append(claimed, c)
 		}
 		n++
 	}
 	if n == 0 {
 		return fmt.Errorf("%s: no tracked files match", strings.Join(args, " "))
 	}
+	// Untracking is a one-time edit; a rule is standing, and will claim
+	// the file straight back. Say so once, however many were untracked.
+	if len(claimed) > 0 {
+		env.Printf("\n%s\n", stillClaimed(env, claimed))
+	}
 	return s.Save()
+}
+
+// stillClaimed explains that untracking will not stick against a rule,
+// naming the layer where they all share one and the file where there is
+// only one.
+func stillClaimed(env *Env, claimed []*over.Change) string {
+	layer := "<layer>"
+	for i, c := range claimed {
+		if i == 0 {
+			layer = c.Layer.String()
+		} else if layer != c.Layer.String() {
+			layer = "<layer>"
+			break
+		}
+	}
+	if len(claimed) == 1 {
+		return fmt.Sprintf("a rule still claims it; carve it out with 'over rule -ignore %s %s'",
+			layer, over.RelTo(env.Dir, claimed[0].Local))
+	}
+	return fmt.Sprintf("%s still claimed by a rule; carve them out with 'over rule -ignore %s <pattern>'",
+		plural(len(claimed), "file"), layer)
 }
 
 // findLayer returns the configured layer named by arg, or nil.
