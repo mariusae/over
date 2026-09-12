@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mariusae/over/internal/content"
 	"github.com/mariusae/over/internal/over"
 	"github.com/mariusae/over/internal/pathspec"
 	"github.com/mariusae/over/internal/spec"
@@ -18,9 +20,11 @@ func init() {
 	Register(trackCmd, untrackCmd)
 }
 
+var trackFlagIncludeBin bool
+
 var trackCmd = &Command{
 	Name:  "track",
-	Usage: "track <layer> <path>...",
+	Usage: "track [-includebin] <layer> <path>...",
 	Short: "add local files to a layer",
 	Long: `Track puts local files under over's management, so that the next
 sync writes them to a layer and later syncs keep them there. It does not
@@ -45,10 +49,19 @@ later, on every machine that adds it. Use "over rule" to see a layer's
 rules, to take one back, or to add the ignore rules that carve exceptions
 out of it.
 
+A layer holds text by default. A rule over a directory of scripts does
+not sweep up the compiled programs beside them, and a binary file named
+outright is refused. Pass -includebin to say that this layer holds
+binary files too; the setting belongs to the layer, and holds for every
+machine that adds it.
+
 Track is the counterpart of sync's other direction: sync discovers new
 files in a layer by itself, but a new local file is only over's business
 once it has been tracked or claimed.
 ` + pathArgs,
+	Flags: func(fs *flag.FlagSet) {
+		fs.BoolVar(&trackFlagIncludeBin, "includebin", false, "let the layer hold binary files, not text alone")
+	},
 	Run: runTrack,
 }
 
@@ -74,6 +87,17 @@ func runTrack(ctx context.Context, env *Env, args []string) error {
 	l := findLayer(layers, layerArg)
 	if l == nil {
 		return fmt.Errorf("%s: not a configured layer; run 'over status' for the list", layerArg)
+	}
+
+	if trackFlagIncludeBin {
+		changed, err := o.SetIncludeBin(ctx, l.Spec, true, over.LocalOrigin(Version()))
+		if err != nil {
+			return err
+		}
+		if changed {
+			env.Printf("%s now holds binary files\n", l)
+		}
+		l.IncludeBin = true
 	}
 
 	// A wildcard names no particular file, so it becomes a rule; a
@@ -103,8 +127,10 @@ func runTrack(ctx context.Context, env *Env, args []string) error {
 		if err != nil {
 			return err
 		}
+		claim := ruleClaim(l, rulePats)
 		for _, rule := range added {
-			env.Printf("%s tracked in %s (rule, %s)\n", rule, l, plural(ruleMatches(l, rulePats), "file"))
+			env.Printf("%s tracked in %s (rule, %s%s)\n", rule, l,
+				plural(len(claim.Paths), "file"), skipped(claim))
 		}
 		n += len(added)
 	}
@@ -137,6 +163,12 @@ func runTrack(ctx context.Context, env *Env, args []string) error {
 		if l.State.Get(rel) != nil {
 			continue
 		}
+		if binary, err := content.IsBinaryFile(path); err != nil {
+			return err
+		} else if binary && !l.IncludeBin {
+			return fmt.Errorf("%s: a binary file, and %s holds text; pass -includebin to take it",
+				over.RelTo(env.Dir, path), l)
+		}
 		if err := over.Track(l, rel); err != nil {
 			return err
 		}
@@ -149,16 +181,32 @@ func runTrack(ctx context.Context, env *Env, args []string) error {
 	return over.SaveStates(layers)
 }
 
-// ruleMatches counts the local files a set of new rules claims right
-// now. A rule that matches nothing is usually a rule with a typo in it,
-// and saying so is cheaper than waiting for the sync that does nothing.
-func ruleMatches(l *over.Layer, pats []pathspec.Pattern) int {
-	probe := &over.Layer{Root: l.Root, Exclude: l.Exclude, Track: pats, Ignore: l.Ignore}
-	claimed, err := probe.ClaimedPaths()
-	if err != nil {
-		return 0
+// ruleClaim reports what a set of new rules takes right now. A rule that
+// matches nothing is usually a rule with a typo in it, and saying so is
+// cheaper than waiting for the sync that does nothing.
+func ruleClaim(l *over.Layer, pats []pathspec.Pattern) over.Claim {
+	probe := &over.Layer{
+		Root:       l.Root,
+		Exclude:    l.Exclude,
+		Track:      pats,
+		Ignore:     l.Ignore,
+		IncludeBin: l.IncludeBin,
 	}
-	return len(claimed)
+	claim, err := probe.Claim()
+	if err != nil {
+		return over.Claim{}
+	}
+	return claim
+}
+
+// skipped renders the tail of a rule's report naming the files it passed
+// over for their contents, which is otherwise a silent surprise.
+func skipped(claim over.Claim) string {
+	if len(claim.Binaries) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; %s skipped, pass -includebin to take them",
+		plural(len(claim.Binaries), "binary"))
 }
 
 var untrackCmd = &Command{

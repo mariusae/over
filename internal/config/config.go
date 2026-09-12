@@ -118,6 +118,11 @@ type RepoLayer struct {
 	// claiming: a file the layer already holds is still synced, since
 	// somebody published it deliberately.
 	Ignore []string `yaml:"ignore,omitempty"`
+
+	// IncludeBin lets the layer claim binary files. Without it a rule
+	// takes only text, so that a rule over a directory of scripts does
+	// not sweep up the compiled programs beside them.
+	IncludeBin bool `yaml:"includebin,omitempty"`
 }
 
 // LoadRepo reads a repository configuration from path. A missing file
@@ -150,6 +155,9 @@ func (r *Repo) Track(name string) []string { return r.Layers[name].Track }
 
 // Ignore returns the patterns the named layer will not claim.
 func (r *Repo) Ignore(name string) []string { return r.Layers[name].Ignore }
+
+// IncludeBin reports whether the named layer claims binary files.
+func (r *Repo) IncludeBin(name string) bool { return r.Layers[name].IncludeBin }
 
 // Set returns the members of the named set, and whether it exists.
 func (r *Repo) Set(name string) ([]string, bool) {

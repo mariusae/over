@@ -16,13 +16,14 @@ func init() {
 }
 
 var (
-	ruleFlagIgnore bool
-	ruleFlagRm     bool
+	ruleFlagIgnore     bool
+	ruleFlagRm         bool
+	ruleFlagIncludeBin bool
 )
 
 var ruleCmd = &Command{
 	Name:  "rule",
-	Usage: "rule [-ignore] [-rm] <layer> [pattern...]",
+	Usage: "rule [-ignore] [-rm] [-includebin] <layer> [pattern...]",
 	Short: "show or change a layer's tracking rules",
 	Long: `Rule prints a layer's tracking rules, or adds to them when
 given patterns. The -ignore flag adds to the layer's ignore rules
@@ -48,11 +49,17 @@ init" does. They are written relative to the layer's root, so that they
 mean the same thing wherever it is materialized; patterns given here are
 path arguments as usual, and are converted.
 
+A layer holds text by default, so a rule over a directory of scripts
+does not sweep up the compiled programs beside them. The -includebin
+flag says that this layer holds binary files too; like a rule, the
+setting belongs to the layer and holds for every machine that adds it.
+
 "over track" with a wildcard in it adds a track rule, which is the
 shortest way to write one.`,
 	Flags: func(fs *flag.FlagSet) {
 		fs.BoolVar(&ruleFlagIgnore, "ignore", false, "add to the layer's ignore rules rather than its track rules")
 		fs.BoolVar(&ruleFlagRm, "rm", false, "remove the patterns from the layer's rules")
+		fs.BoolVar(&ruleFlagIncludeBin, "includebin", false, "let the layer hold binary files, not text alone")
 	},
 	Run: runRule,
 }
@@ -80,9 +87,22 @@ func runRule(ctx context.Context, env *Env, args []string) error {
 	if l == nil {
 		return fmt.Errorf("%s: not a configured layer; run 'over status' for the list", layerArg)
 	}
+	if ruleFlagIncludeBin {
+		changed, err := o.SetIncludeBin(ctx, l.Spec, true, over.LocalOrigin(Version()))
+		if err != nil {
+			return err
+		}
+		if changed {
+			env.Printf("%s now holds binary files\n", l)
+		}
+		l.IncludeBin = true
+	}
 	if len(patterns) == 0 {
 		if ruleFlagRm {
 			return Usagef("expected at least one pattern")
+		}
+		if ruleFlagIncludeBin {
+			return nil
 		}
 		return listRules(env, o, l)
 	}
@@ -154,7 +174,7 @@ func rulesFor(env *Env, o *over.Over, l *over.Layer, patterns []string) ([]strin
 func listRules(env *Env, o *over.Over, l *over.Layer) error {
 	track := o.LayerRules(l.Spec, over.RuleTrack)
 	ignore := o.LayerRules(l.Spec, over.RuleIgnore)
-	if len(track) == 0 && len(ignore) == 0 {
+	if len(track) == 0 && len(ignore) == 0 && !l.IncludeBin {
 		env.Printf("no rules; %s holds only what is tracked by name\n", l)
 		return nil
 	}
@@ -165,6 +185,9 @@ func listRules(env *Env, o *over.Over, l *over.Layer) error {
 	}
 	for _, rule := range ignore {
 		fmt.Fprintf(tw, "ignore\t%s\n", rule)
+	}
+	if l.IncludeBin {
+		fmt.Fprintf(tw, "includebin\ttrue\n")
 	}
 	return nil
 }

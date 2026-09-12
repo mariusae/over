@@ -214,3 +214,133 @@ func TestRuleErrors(t *testing.T) {
 		t.Errorf("no layer: exit %d, want %d", code, exitUsage)
 	}
 }
+
+// binaryFile is content that looks like a compiled program: a NUL early
+// on is what tells over it is not text.
+const binaryFile = "\x7fELF\x02\x01\x01\x00\x00\x00compiled"
+
+// TestRuleSkipsBinaries is the case content sniffing exists for: a
+// directory of scripts with a few compiled programs sitting in it.
+func TestRuleSkipsBinaries(t *testing.T) {
+	c, r := newLayer(t)
+	c.mustOver("sync")
+	c.write("bin/hello", "#!/bin/sh\necho hello\n")
+	c.write("bin/hi.py", "#!/usr/bin/env python3\nprint()\n")
+	c.write("bin/program", binaryFile)
+
+	out := c.mustOver("track", "mariusae/config:editors", "bin/...")
+	if !strings.Contains(out, "rule, 2 files") {
+		t.Errorf("track = %q, want the two scripts", out)
+	}
+	// The skip is reported rather than silent, and says how to undo it.
+	if !strings.Contains(out, "1 binary skipped, pass -includebin to take them") {
+		t.Errorf("track does not report the skipped binary: %q", out)
+	}
+
+	out = c.mustOver("sync")
+	for _, want := range []string{"bin/hello to", "bin/hi.py to"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("sync output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "bin/program") {
+		t.Errorf("sync took the binary:\n%s", out)
+	}
+	r.pull()
+	if r.exists("editors/bin/program") {
+		t.Error("the binary reached the layer")
+	}
+}
+
+// TestTrackRefusesANamedBinary checks the other half of the default: a
+// binary named outright is refused rather than quietly skipped, since
+// naming it says you meant it.
+func TestTrackRefusesANamedBinary(t *testing.T) {
+	c, _ := newLayer(t)
+	c.mustOver("sync")
+	c.write("bin/program", binaryFile)
+
+	code, _, stderr := c.over("track", "mariusae/config:editors", "bin/program")
+	if code != exitError {
+		t.Errorf("exit %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "a binary file") || !strings.Contains(stderr, "-includebin") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+// TestIncludeBin checks the opt-in, and that it is a property of the
+// layer rather than of the command that set it.
+func TestIncludeBin(t *testing.T) {
+	c, r := newLayer(t)
+	c.mustOver("sync")
+	c.write("bin/hello", "#!/bin/sh\necho hello\n")
+	c.write("bin/program", binaryFile)
+
+	out := c.mustOver("track", "-includebin", "mariusae/config:editors", "bin/...")
+	if !strings.Contains(out, "now holds binary files") {
+		t.Errorf("track -includebin = %q", out)
+	}
+	if !strings.Contains(out, "rule, 2 files") || strings.Contains(out, "skipped") {
+		t.Errorf("track -includebin skipped something: %q", out)
+	}
+	c.mustOver("sync")
+	r.pull()
+	if got := r.read("editors/bin/program"); got != binaryFile {
+		t.Errorf("the binary did not survive the round trip: %q", got)
+	}
+
+	// The setting is recorded with the layer, and listed.
+	if got := r.read("config.yaml"); !strings.Contains(got, "includebin: true") {
+		t.Errorf("config.yaml = %q", got)
+	}
+	if out := c.mustOver("rule", "mariusae/config:editors"); !strings.Contains(collapse(out), "includebin true") {
+		t.Errorf("rule listing = %q", out)
+	}
+
+	// A binary added later is claimed by the same rule, with no further
+	// ceremony.
+	c.write("bin/another", binaryFile)
+	if out := c.mustOver("sync"); !strings.Contains(out, "bin/another to mariusae/config:editors (claimed)") {
+		t.Errorf("sync = %q", out)
+	}
+}
+
+// TestIncludeBinTravels checks that the setting reaches every machine
+// that adds the layer, as a rule does.
+func TestIncludeBinTravels(t *testing.T) {
+	c, _ := newLayer(t)
+	c.mustOver("sync")
+	c.write("bin/hello", "#!/bin/sh\necho hello\n")
+	c.mustOver("track", "-includebin", "mariusae/config:editors", "bin/...")
+	c.mustOver("sync")
+
+	other := c.sub(t)
+	other.mustOver("add", "mariusae/config:editors")
+	other.mustOver("sync")
+	other.write("bin/program", binaryFile)
+	if out := other.mustOver("sync"); !strings.Contains(out, "bin/program to mariusae/config:editors (claimed)") {
+		t.Errorf("the setting did not travel with the layer:\n%s", out)
+	}
+}
+
+// TestBinaryRulesBearOnClaimingOnly checks the line drawn elsewhere for
+// ignore rules: a file over already tracks keeps syncing, whatever its
+// contents become.
+func TestBinaryRulesBearOnClaimingOnly(t *testing.T) {
+	c, r := newLayer(t)
+	c.mustOver("sync")
+	c.write("bin/tool", "#!/bin/sh\necho hi\n")
+	c.mustOver("track", "mariusae/config:editors", "bin/...")
+	c.mustOver("sync")
+
+	// The script is replaced by a compiled program of the same name.
+	c.write("bin/tool", binaryFile)
+	if out := c.mustOver("sync"); !strings.Contains(out, "bin/tool to mariusae/config:editors") {
+		t.Errorf("a tracked file stopped syncing when it became binary:\n%s", out)
+	}
+	r.pull()
+	if got := r.read("editors/bin/tool"); got != binaryFile {
+		t.Errorf("layer copy = %q", got)
+	}
+}

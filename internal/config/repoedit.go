@@ -92,6 +92,37 @@ func RemoveRule(path, name string, patterns []string) ([]string, error) {
 	return removed, err
 }
 
+// SetIncludeBin records whether a layer claims binary files. It reports
+// whether the setting changed.
+func SetIncludeBin(path, name string, on bool) (bool, error) {
+	var changed bool
+	err := editRepo(path, func(top *yaml.Node) error {
+		layer, err := layerEntry(top, name)
+		if err != nil {
+			return err
+		}
+		want := "true"
+		if !on {
+			want = "false"
+		}
+		if node := mapValue(layer, "includebin"); node != nil {
+			changed = node.Value != want
+			node.Value, node.Tag = want, "!!bool"
+			return nil
+		}
+		if !on {
+			// Absent already means off; do not write it out.
+			return nil
+		}
+		node := scalar(want)
+		node.Tag = "!!bool"
+		layer.Content = append(layer.Content, scalar("includebin"), node)
+		changed = true
+		return nil
+	})
+	return changed, err
+}
+
 // editRepo applies edit to the parsed document at path and writes it
 // back. See [AddLayer] for why the document is edited rather than
 // re-marshalled.

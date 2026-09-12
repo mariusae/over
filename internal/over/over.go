@@ -219,6 +219,11 @@ type Layer struct {
 	Track  []pathspec.Pattern
 	Ignore []pathspec.Pattern
 
+	// IncludeBin lets the layer claim binary files. Without it a rule
+	// takes only text, so that a rule over a directory of scripts does
+	// not sweep up the compiled programs beside them.
+	IncludeBin bool
+
 	tombPath string
 }
 
@@ -309,6 +314,7 @@ func (o *Over) Layers(ctx context.Context, update bool) ([]*Layer, error) {
 			Exclude:    exclusions,
 			Track:      track,
 			Ignore:     ignore,
+			IncludeBin: rc.IncludeBin(s.Name),
 			Root:       root,
 			Index:      i,
 			Repo:       repo,

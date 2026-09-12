@@ -249,6 +249,26 @@ otherwise hard. What a layer holds is what a layer holds: a file already
 in it keeps syncing whatever the rules say, because somebody published
 it deliberately.
 
+A layer holds **text** by default. That is what makes a rule over a
+directory like `$HOME/bin` usable: it takes the scripts and passes over
+the compiled programs sitting beside them, and says so rather than
+leaving you to notice.
+
+	$ over track mariusae/env:bin bin/...
+	bin/... tracked in mariusae/env:bin (rule, 12 files; 3 binaries skipped, pass -includebin to take them)
+
+A binary named outright is refused instead of skipped, since naming it
+says you meant it. `-includebin` is the opt-in, and records that the
+layer holds binary files — for every machine that adds it, as a rule
+does:
+
+	$ over track -includebin mariusae/env:fonts .fonts/...
+
+Whether a file is binary is decided the way git decides it: a NUL byte
+near the start. Like the ignore rules, it bears on claiming only — a
+file over already tracks keeps syncing even if it becomes a compiled
+program tomorrow.
+
 `ignore` rules are the counterweight:
 
 	$ over rule -ignore mariusae/env:apex .apex/cache/...
@@ -326,9 +346,9 @@ elements:
 	over restore <revision> <path>...
 	over reset <path>...
 	over ack <path>...
-	over track <layer> <path>...
+	over track [-includebin] <layer> <path>...
 	over untrack <path>...
-	over rule [-ignore] [-rm] <layer> [pattern...]
+	over rule [-ignore] [-rm] [-includebin] <layer> [pattern...]
 	over exclude [-rm] [path...]
 
 Run `over help <command>` for the details of any of them.
@@ -425,6 +445,7 @@ no network.
 	internal/gitrepo     the git command line, wrapped
 	internal/spec        layer specifications
 	internal/pathspec    path arguments
+	internal/content     whether a file holds text
 	internal/diff        unified diffs
 
 ## Adding a command

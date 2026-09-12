@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/mariusae/over/internal/content"
 )
 
 // Context is the number of unchanged lines shown around each change.
@@ -22,7 +24,7 @@ func Unified(aname, bname string, a, b []byte) string {
 	if bytes.Equal(a, b) {
 		return ""
 	}
-	if isBinary(a) || isBinary(b) {
+	if content.IsBinary(a) || content.IsBinary(b) {
 		return fmt.Sprintf("Binary files %s and %s differ\n", aname, bname)
 	}
 	alines, aeol := splitLines(a)
@@ -66,13 +68,6 @@ func span(start, count int) string {
 		return fmt.Sprintf("%d", start+1)
 	}
 	return fmt.Sprintf("%d,%d", start+1, count)
-}
-
-func isBinary(data []byte) bool {
-	if len(data) > 8000 {
-		data = data[:8000]
-	}
-	return bytes.IndexByte(data, 0) >= 0
 }
 
 // splitLines splits data into lines, dropping the line terminators. It

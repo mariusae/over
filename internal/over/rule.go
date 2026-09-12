@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mariusae/over/internal/config"
+	"github.com/mariusae/over/internal/content"
 	"github.com/mariusae/over/internal/pathspec"
 	"github.com/mariusae/over/internal/spec"
 )
@@ -41,6 +42,16 @@ const (
 // Claims reports whether the layer's rules claim a local path, and so
 // whether over will write it to the layer without being told to.
 func (l *Layer) Claims(local string) bool {
+	if !l.matches(local) {
+		return false
+	}
+	binary, err := l.binary(local)
+	return err == nil && !binary
+}
+
+// matches reports whether the layer's patterns cover a path, before its
+// contents are considered.
+func (l *Layer) matches(local string) bool {
 	if l.Excluded(local) {
 		return false
 	}
@@ -50,11 +61,40 @@ func (l *Layer) Claims(local string) bool {
 	return !pathspec.Patterns(l.Ignore).MatchAny(local)
 }
 
+// binary reports whether a file is one the layer will not claim on
+// account of its contents. A layer that holds binary files considers
+// nothing binary.
+func (l *Layer) binary(local string) (bool, error) {
+	if l.IncludeBin {
+		return false, nil
+	}
+	return content.IsBinaryFile(local)
+}
+
+// A Claim is what a layer's rules make of the file system.
+type Claim struct {
+	// Paths are the layer-relative paths the rules claim.
+	Paths []string
+
+	// Binaries are the paths the patterns cover but the rules pass
+	// over for holding binary content. They are reported rather than
+	// silently dropped: a rule that skips half a directory should say
+	// so.
+	Binaries []string
+}
+
 // ClaimedPaths returns the layer-relative paths of the local files the
-// layer's rules claim. Each rule is anchored at a literal prefix, so the
-// walk starts there rather than at the root.
+// layer's rules claim.
 func (l *Layer) ClaimedPaths() ([]string, error) {
-	var paths []string
+	claim, err := l.Claim()
+	return claim.Paths, err
+}
+
+// Claim applies the layer's rules to the file system. Each rule is
+// anchored at a literal prefix, so the walk starts there rather than at
+// the root.
+func (l *Layer) Claim() (Claim, error) {
+	var claim Claim
 	for _, base := range walkRoots(l.Track) {
 		err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -73,21 +113,29 @@ func (l *Layer) ClaimedPaths() ([]string, error) {
 				}
 				return nil
 			}
-			if !d.Type().IsRegular() || !l.Claims(path) {
+			if !d.Type().IsRegular() || !l.matches(path) {
 				return nil
 			}
 			rel, err := filepath.Rel(l.Root, path)
 			if err != nil {
 				return err
 			}
-			paths = append(paths, filepath.ToSlash(rel))
+			binary, err := l.binary(path)
+			if err != nil {
+				return err
+			}
+			if binary {
+				claim.Binaries = append(claim.Binaries, filepath.ToSlash(rel))
+				return nil
+			}
+			claim.Paths = append(claim.Paths, filepath.ToSlash(rel))
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return Claim{}, err
 		}
 	}
-	return paths, nil
+	return claim, nil
 }
 
 // walkRoots returns the directories that need walking to find everything
@@ -167,6 +215,43 @@ func RelativeRule(l *Layer, pat pathspec.Pattern) (string, error) {
 // under reports whether a path lies at or beneath a directory.
 func under(path, dir string) bool {
 	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+// SetIncludeBin records that a layer holds binary files, so that its
+// rules stop passing over them. Like a rule, the setting belongs to the
+// layer and is pushed. It reports whether anything changed.
+func (o *Over) SetIncludeBin(ctx context.Context, s spec.Spec, on bool, origin Origin) (bool, error) {
+	repo, err := o.Repo(ctx, s)
+	if err != nil {
+		return false, err
+	}
+	if err := repo.Update(ctx); err != nil {
+		return false, err
+	}
+	path := filepath.Join(repo.Dir(), "config.yaml")
+	changed, err := config.SetIncludeBin(path, s.Name, on)
+	if err != nil || !changed {
+		return false, err
+	}
+	what := "hold binary files"
+	if !on {
+		what = "hold only text"
+	}
+	subject := fmt.Sprintf("config: %s may %s", s.Name, what)
+	if _, err := repo.Commit(ctx, Message(subject, nil, origin)); err != nil {
+		return false, err
+	}
+	return true, repo.Push(ctx)
+}
+
+// LayerIncludeBin reports whether a layer holds binary files, as its
+// repository has it.
+func (o *Over) LayerIncludeBin(s spec.Spec) bool {
+	rc, err := config.LoadRepo(filepath.Join(o.repoDir(s.Repository()), "config.yaml"))
+	if err != nil {
+		return false
+	}
+	return rc.IncludeBin(s.Name)
 }
 
 // LayerRules returns a layer's rules of the given kind, as they are

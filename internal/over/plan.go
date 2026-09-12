@@ -146,12 +146,14 @@ func Plan(layers []*Layer) ([]Change, error) {
 		if err != nil {
 			return nil, err
 		}
-		claimed, err := l.ClaimedPaths()
+		claim, err := l.Claim()
 		if err != nil {
 			return nil, err
 		}
+		claimed := map[string]bool{}
 		paths := map[string]bool{}
-		for _, p := range claimed {
+		for _, p := range claim.Paths {
+			claimed[p] = true
 			paths[p] = true
 		}
 		for p := range remote {
@@ -177,7 +179,9 @@ func Plan(layers []*Layer) ([]Change, error) {
 				RemoteTombstone: l.Tombstones.Has(p),
 				Base:            l.State.Get(p),
 			}
-			c.Claimed = l.Claims(c.Local)
+			// The walk has already read what it needed to; asking
+			// again would re-read every file.
+			c.Claimed = claimed[p]
 			info, err := os.Lstat(c.Local)
 			switch {
 			case os.IsNotExist(err):
