@@ -63,6 +63,33 @@ Look at the difference, then resolve it in one direction or the other:
 `reset` does not require a conflict: it always just overwrites, which
 makes it the way to undo a local edit as well.
 
+## Starting a layer
+
+`over init` creates a layer: it declares it in the repository's
+config.yaml, commits, and pushes. Nothing else is needed to bring one
+into existence, so this is the whole of it:
+
+	$ over init mariusae/dotfiles:editors
+	created mariusae/dotfiles:editors (root $HOME)
+	added mariusae/dotfiles:editors
+	track files into it with 'over track mariusae/dotfiles:editors <path>...'
+	$ over track mariusae/dotfiles:editors .vimrc .emacs
+	$ over sync
+
+The repository has to exist, but it may be empty — a repository just
+created and never pushed to has no commits and no branch at all, and
+init makes the first commit in it. Creating the repository itself is not
+over's business; `gh repo create` does that half.
+
+`-root` sets the root the layer declares for itself, which is where
+every machine that adds it will materialize it:
+
+	over init -root /etc mariusae/dotfiles:etc
+
+That is the layer's own root, shared by everyone; `over root` sets a
+local override instead. Init edits config.yaml in place, so comments and
+anything else in the file are kept.
+
 ## What over knows
 
 `over show` reports everything over has on a path: the local file, what
@@ -221,6 +248,7 @@ elements:
 
 ## Commands
 
+	over init [-root dir] [-no-add] <layer>...
 	over add [-before layer] [-root dir] <layer>...
 	over rm <layer>...
 	over root <layer> [dir]

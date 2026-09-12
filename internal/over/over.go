@@ -384,7 +384,7 @@ func (o *Over) ResolveSpecs(ctx context.Context, args []string) ([]spec.Spec, er
 		switch {
 		case s.Name == "":
 			if len(names) == 0 {
-				return nil, fmt.Errorf("%s: repository provides no layers", s)
+				return nil, fmt.Errorf("%s: repository provides no layers; create one with 'over init %s:<layer>'", s, s)
 			}
 			for _, name := range names {
 				out = append(out, s.WithName(name))
@@ -400,8 +400,12 @@ func (o *Over) ResolveSpecs(ctx context.Context, args []string) ([]spec.Spec, er
 				continue
 			}
 			if !contains(names, s.Name) {
-				return nil, fmt.Errorf("%s: no such layer or set in %s (have %s)",
-					s, s.Repository(), strings.Join(names, ", "))
+				if len(names) == 0 {
+					return nil, fmt.Errorf("%s: %s provides no layers; create one with 'over init %s'",
+						s, s.Repository(), s)
+				}
+				return nil, fmt.Errorf("%s: no such layer or set in %s (have %s); create it with 'over init %s'",
+					s, s.Repository(), strings.Join(names, ", "), s)
 			}
 			out = append(out, s)
 		}

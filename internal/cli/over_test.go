@@ -114,13 +114,16 @@ func (c *client) exists(rel string) bool {
 // A repo is a working clone of one of the bare repositories, used by
 // tests to play the part of another machine editing a layer directly.
 type repo struct {
-	t   *testing.T
-	dir string
+	t    *testing.T
+	bare string
+	dir  string
 }
 
-// newRepo creates the bare repository owner/name and returns a working
-// clone of it with an initial commit.
-func (c *client) newRepo(owner, name string) *repo {
+// newBareRepo creates the bare repository owner/name with nothing in it:
+// no commits, and a branch that does not exist yet. That is a repository
+// as a hosting service hands it over, and over has to be able to make
+// the first commit in one. The working clone is made on demand.
+func (c *client) newBareRepo(owner, name string) *repo {
 	c.t.Helper()
 	bare := filepath.Join(c.remotes, owner, name+".git")
 	mkdir(c.t, filepath.Dir(bare))
@@ -128,24 +131,40 @@ func (c *client) newRepo(owner, name string) *repo {
 	// The default branch of a bare repository created without global
 	// configuration is master; the tests use main throughout.
 	git(c.t, bare, "symbolic-ref", "HEAD", "refs/heads/main")
+	return &repo{t: c.t, bare: bare, dir: filepath.Join(c.root, "work", owner, name)}
+}
 
-	dir := filepath.Join(c.root, "work", owner, name)
-	mkdir(c.t, filepath.Dir(dir))
-	git(c.t, "", "clone", "--quiet", bare, dir)
-	r := &repo{t: c.t, dir: dir}
-	git(r.t, dir, "symbolic-ref", "HEAD", "refs/heads/main")
+// newRepo creates the bare repository owner/name and a working clone of
+// it, ready for the caller to write to and commit.
+func (c *client) newRepo(owner, name string) *repo {
+	c.t.Helper()
+	r := c.newBareRepo(owner, name)
+	r.clone()
 	return r
+}
+
+// clone materializes the working clone if it is not there already.
+func (r *repo) clone() {
+	r.t.Helper()
+	if _, err := os.Stat(filepath.Join(r.dir, ".git")); err == nil {
+		return
+	}
+	mkdir(r.t, filepath.Dir(r.dir))
+	git(r.t, "", "clone", "--quiet", r.bare, r.dir)
+	git(r.t, r.dir, "symbolic-ref", "HEAD", "refs/heads/main")
 }
 
 // write creates a file in the working clone.
 func (r *repo) write(rel, content string) {
 	r.t.Helper()
+	r.clone()
 	writeFile(r.t, filepath.Join(r.dir, rel), content)
 }
 
 // remove deletes a file from the working clone.
 func (r *repo) remove(rel string) {
 	r.t.Helper()
+	r.clone()
 	if err := os.Remove(filepath.Join(r.dir, rel)); err != nil {
 		r.t.Fatal(err)
 	}
@@ -154,6 +173,7 @@ func (r *repo) remove(rel string) {
 // read returns the contents of a file in the working clone.
 func (r *repo) read(rel string) string {
 	r.t.Helper()
+	r.clone()
 	data, err := os.ReadFile(filepath.Join(r.dir, rel))
 	if err != nil {
 		r.t.Fatalf("read %s: %v", rel, err)
@@ -163,6 +183,7 @@ func (r *repo) read(rel string) string {
 
 // exists reports whether a file exists in the working clone.
 func (r *repo) exists(rel string) bool {
+	r.clone()
 	_, err := os.Stat(filepath.Join(r.dir, rel))
 	return err == nil
 }
@@ -170,6 +191,7 @@ func (r *repo) exists(rel string) bool {
 // commit publishes everything in the working clone.
 func (r *repo) commit(message string) {
 	r.t.Helper()
+	r.clone()
 	git(r.t, r.dir, "add", "--all", ".")
 	git(r.t, r.dir, "-c", "user.name=test", "-c", "user.email=test@example.com",
 		"commit", "--quiet", "--message", message)
@@ -179,6 +201,7 @@ func (r *repo) commit(message string) {
 // pull brings the working clone up to date with what over has pushed.
 func (r *repo) pull() {
 	r.t.Helper()
+	r.clone()
 	git(r.t, r.dir, "fetch", "--quiet", "origin")
 	git(r.t, r.dir, "reset", "--quiet", "--hard", "origin/main")
 }

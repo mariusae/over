@@ -117,7 +117,14 @@ func CommitMessage(cs []*Change, origin Origin) string {
 	if len(cs) == 1 {
 		subject = fmt.Sprintf("%s: %s", strings.Join(layers, ", "), cs[0].Path)
 	}
+	return Message(subject, lines, origin)
+}
 
+// Message composes a commit message: a subject, a body of whatever lines
+// describe the change, and the trailers naming where it came from. Every
+// commit over makes goes through here, so that all of them can be read
+// back the same way.
+func Message(subject string, lines []string, origin Origin) string {
 	var b strings.Builder
 	b.WriteString(subject)
 	b.WriteString("\n\n")
@@ -125,7 +132,9 @@ func CommitMessage(cs []*Change, origin Origin) string {
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
-	b.WriteByte('\n')
+	if len(lines) > 0 {
+		b.WriteByte('\n')
+	}
 	fmt.Fprintf(&b, "%s: %s\n", trailerHost, origin.Host)
 	fmt.Fprintf(&b, "%s: %s\n", trailerUser, origin.User)
 	fmt.Fprintf(&b, "%s: %s\n", trailerTime, origin.Time.UTC().Format(time.RFC3339))
