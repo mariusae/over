@@ -614,6 +614,35 @@ time over opens it, so changing this does not strand what is there.
 	go build ./cmd/over     # writes ./over
 	go install ./cmd/over   # writes $GOBIN/over
 
+## Installing
+
+`bootstrap.sh` brings up a machine from a set of layers, given nothing
+but a shell:
+
+	curl -fsSL https://raw.githubusercontent.com/mariusae/over/master/bootstrap.sh |
+		sh -s -- mariusae/env::mac
+
+Its only job is to get one real binary onto the machine. After thunk is
+there, nothing arrives in compiled form: over itself is a *thunk*, a
+dozen lines of TOML naming a module version and a compiler, and so is
+anything else the layers carry -- a thunk is text, and a layer holds
+text. Read the script before you pipe it anywhere; that is why it is
+short. `sh bootstrap.sh -n` prints the plan without doing any of it.
+
+The versions it installs are pinned exactly, because a bootstrap that
+floated would hand two machines different software under the same
+command. `repin.sh` moves those pins forward:
+
+	./repin.sh -n           # what would change
+	./repin.sh              # the newest over, and the newest thunk
+	./repin.sh v0.2.0       # a particular over
+
+The pins are asked for rather than typed: `thunk create` resolves the
+coordinate against the module proxy and writes the manifest it would
+build from, so the version and the module hash come from the thing that
+does the building. Re-pinning needs the commit to be pushed first -- the
+proxy can only serve what it can fetch.
+
 ## Testing
 
 	go test ./...

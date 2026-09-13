@@ -49,8 +49,8 @@ THUNK_RELEASE_BASE=${THUNK_RELEASE_BASE:-https://github.com/mariusae/thunk/relea
 # tags yet; it names one commit exactly all the same.
 OVER_PACKAGE=${OVER_PACKAGE:-github.com/mariusae/over/cmd/over}
 OVER_MODULE=${OVER_MODULE:-github.com/mariusae/over}
-OVER_VERSION=${OVER_VERSION:-v0.0.0-20260913025513-383072556336}
-OVER_CKSUM=${OVER_CKSUM:-h1:fASsQWGZKkaXZgBeab6P+SfTVDnXZkePpAKrmgxnO2E=}
+OVER_VERSION=${OVER_VERSION:-v0.0.0-20260913170603-657e28bdf0c0}
+OVER_CKSUM=${OVER_CKSUM:-h1:xwqZk9GF+YgniSK0+W556U9lTDole6dEtK+GT1yRFmY=}
 OVER_GO=${OVER_GO:-1.27.0}
 
 # Setting OVER_GIT switches to building over from a repository instead,
