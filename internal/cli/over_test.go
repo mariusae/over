@@ -248,3 +248,12 @@ func readFile(path string) (string, error) {
 func symlink(target, path string) error { return os.Symlink(target, path) }
 
 func readlink(path string) (string, error) { return os.Readlink(path) }
+
+// rmRemote deletes a bare repository, standing in for one that has been
+// taken down since it was added.
+func (c *client) rmRemote(owner, name string) {
+	c.t.Helper()
+	if err := os.RemoveAll(filepath.Join(c.remotes, owner, name+".git")); err != nil {
+		c.t.Fatal(err)
+	}
+}

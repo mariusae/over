@@ -123,6 +123,86 @@ func SetIncludeBin(path, name string, on bool) (bool, error) {
 	return changed, err
 }
 
+// AddSetMembers adds members to a set in the repository configuration at
+// path, creating the set if it has none. Members already there are
+// skipped; the ones added are returned.
+func AddSetMembers(path, name string, members []string) ([]string, error) {
+	var added []string
+	err := editRepo(path, func(top *yaml.Node) error {
+		set, err := setEntry(top, name)
+		if err != nil {
+			return err
+		}
+		for _, member := range members {
+			if seqIndex(set, member) >= 0 {
+				continue
+			}
+			set.Content = append(set.Content, scalar(member))
+			added = append(added, member)
+		}
+		return nil
+	})
+	return added, err
+}
+
+// RemoveSetMembers drops members from a set. It returns the ones it
+// removed, and leaves the set in place even when it empties it: an empty
+// set is an error at resolution, not something to delete behind the
+// user's back. Use [RemoveSet] to take the set away.
+func RemoveSetMembers(path, name string, members []string) ([]string, error) {
+	var removed []string
+	err := editRepo(path, func(top *yaml.Node) error {
+		sets := mapValue(top, "sets")
+		if sets == nil {
+			return nil
+		}
+		if sets.Kind != yaml.MappingNode {
+			return fmt.Errorf("sets is not a mapping")
+		}
+		set := mapValue(sets, name)
+		if set == nil {
+			return nil
+		}
+		if set.Kind != yaml.SequenceNode {
+			return fmt.Errorf("set %s is not a list", name)
+		}
+		for _, member := range members {
+			if i := seqIndex(set, member); i >= 0 {
+				set.Content = append(set.Content[:i], set.Content[i+1:]...)
+				removed = append(removed, member)
+			}
+		}
+		return nil
+	})
+	return removed, err
+}
+
+// RemoveSet deletes a set entirely, reporting whether it was there. The
+// layers it grouped are untouched: a set is a name for a group, not the
+// group itself.
+func RemoveSet(path, name string) (bool, error) {
+	var removed bool
+	err := editRepo(path, func(top *yaml.Node) error {
+		sets := mapValue(top, "sets")
+		if sets == nil {
+			return nil
+		}
+		if sets.Kind != yaml.MappingNode {
+			return fmt.Errorf("sets is not a mapping")
+		}
+		for i := 0; i+1 < len(sets.Content); i += 2 {
+			if sets.Content[i].Value != name {
+				continue
+			}
+			sets.Content = append(sets.Content[:i], sets.Content[i+2:]...)
+			removed = true
+			break
+		}
+		return nil
+	})
+	return removed, err
+}
+
 // editRepo applies edit to the parsed document at path and writes it
 // back. See [AddLayer] for why the document is edited rather than
 // re-marshalled.
@@ -176,6 +256,28 @@ func layerEntry(top *yaml.Node, name string) (*yaml.Node, error) {
 		return nil, fmt.Errorf("layer %s is not a mapping", name)
 	}
 	return layer, nil
+}
+
+// setEntry returns the sequence holding a set's members, creating it,
+// and the sets mapping above it, where they are missing.
+func setEntry(top *yaml.Node, name string) (*yaml.Node, error) {
+	sets := mapValue(top, "sets")
+	if sets == nil {
+		sets = &yaml.Node{Kind: yaml.MappingNode}
+		top.Content = append(top.Content, scalar("sets"), sets)
+	}
+	if sets.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("sets is not a mapping")
+	}
+	set := mapValue(sets, name)
+	if set == nil {
+		set = &yaml.Node{Kind: yaml.SequenceNode}
+		sets.Content = append(sets.Content, scalar(name), set)
+	}
+	if set.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("set %s is not a list", name)
+	}
+	return set, nil
 }
 
 // seqIndex returns the position of a scalar in a sequence, or -1.

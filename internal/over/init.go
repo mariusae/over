@@ -79,9 +79,6 @@ func (o *Over) Init(ctx context.Context, args []string, root string, origin Orig
 
 		var added []string
 		for _, s := range specs {
-			if _, ok := rc.Set(s.Name); ok {
-				return nil, fmt.Errorf("%s: %s is a set in %s, not a layer", s, s.Name, s.Repository())
-			}
 			if contains(names, s.Name) {
 				return nil, fmt.Errorf("%s: the layer already exists; add it with 'over add %s'", s, s)
 			}

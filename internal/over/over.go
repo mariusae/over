@@ -382,61 +382,185 @@ func (l *Layer) Scan() (map[string]Content, error) {
 	return files, nil
 }
 
-// ResolveSpecs expands layer specifications against their repositories,
-// turning a bare repository into all of its layers and a set name into
-// its members. The results are in the order the user gave them.
+// ResolveSpecs expands layer specifications into the layers they name,
+// in the order the arguments put them. A bare repository becomes every
+// layer it provides, and a set becomes its members.
+//
+// Sets may name sets, and may name layers and sets in other
+// repositories, so resolution is recursive and may open repositories the
+// arguments never mentioned. It is also the only place in over where one
+// short argument expands into something the user did not type, which is
+// why the callers print what came back. A layer reached twice -- two sets
+// sharing a member -- is emitted once, at its first position.
 func (o *Over) ResolveSpecs(ctx context.Context, args []string) ([]spec.Spec, error) {
-	var out []spec.Spec
+	r := &resolver{o: o, repos: map[string]*resolvedRepo{}, seen: map[string]bool{}, open: map[string]bool{}}
 	for _, arg := range args {
-		s, err := spec.Parse(arg)
+		ref, err := spec.ParseRef(arg)
 		if err != nil {
 			return nil, err
 		}
-		repo, err := o.Repo(ctx, s)
-		if err != nil {
+		if err := r.resolve(ctx, ref, nil); err != nil {
 			return nil, err
-		}
-		if err := repo.Update(ctx); err != nil {
-			return nil, err
-		}
-		rc, err := config.LoadRepo(filepath.Join(repo.Dir(), "config.yaml"))
-		if err != nil {
-			return nil, err
-		}
-		names, err := rc.LayerNames(repo.Dir())
-		if err != nil {
-			return nil, err
-		}
-		switch {
-		case s.Name == "":
-			if len(names) == 0 {
-				return nil, fmt.Errorf("%s: repository provides no layers; create one with 'over init %s:<layer>'", s, s)
-			}
-			for _, name := range names {
-				out = append(out, s.WithName(name))
-			}
-		default:
-			if members, ok := rc.Set(s.Name); ok {
-				if len(members) == 0 {
-					return nil, fmt.Errorf("%s: set %s is empty", s, s.Name)
-				}
-				for _, name := range members {
-					out = append(out, s.WithName(name))
-				}
-				continue
-			}
-			if !contains(names, s.Name) {
-				if len(names) == 0 {
-					return nil, fmt.Errorf("%s: %s provides no layers; create one with 'over init %s'",
-						s, s.Repository(), s)
-				}
-				return nil, fmt.Errorf("%s: no such layer or set in %s (have %s); create it with 'over init %s'",
-					s, s.Repository(), strings.Join(names, ", "), s)
-			}
-			out = append(out, s)
 		}
 	}
-	return out, nil
+	return r.out, nil
+}
+
+// A resolver expands references into layers. It remembers what it has
+// emitted, so that a diamond among sets yields one layer rather than
+// two, and which sets it is in the middle of expanding, so that a cycle
+// is an error rather than a hang.
+type resolver struct {
+	o     *Over
+	out   []spec.Spec
+	repos map[string]*resolvedRepo // by repository, so each is opened once
+	seen  map[string]bool          // layers already emitted
+	open  map[string]bool          // sets being expanded, by canonical form
+}
+
+// A resolvedRepo is what resolution needs to know about one repository.
+type resolvedRepo struct {
+	config *config.Repo
+	names  []string // the layers it provides, sorted
+}
+
+// resolve expands one reference. The path is the chain of sets that led
+// here, for the error a cycle deserves.
+func (r *resolver) resolve(ctx context.Context, ref spec.Ref, path []string) error {
+	rr, err := r.repo(ctx, ref.Spec)
+	if err != nil {
+		return err
+	}
+	switch {
+	case ref.Set:
+		return r.resolveSet(ctx, ref, rr, path)
+	case ref.Spec.Name == "":
+		if len(rr.names) == 0 {
+			return fmt.Errorf("%s: repository provides no layers; create one with 'over init %s:<layer>'", ref.Spec, ref.Spec)
+		}
+		for _, name := range rr.names {
+			r.emit(ref.Spec.WithName(name))
+		}
+		return nil
+	default:
+		if !contains(rr.names, ref.Spec.Name) {
+			return noLayer(ref, rr.config, rr.names)
+		}
+		r.emit(ref.Spec)
+		return nil
+	}
+}
+
+// resolveSet expands a set into its members.
+func (r *resolver) resolveSet(ctx context.Context, ref spec.Ref, rr *resolvedRepo, path []string) error {
+	key := ref.String()
+	if r.open[key] {
+		return fmt.Errorf("%s: set refers to itself: %s", key, strings.Join(append(path, key), " -> "))
+	}
+	members, ok := rr.config.Set(ref.Spec.Name)
+	if !ok {
+		return noSet(ref, rr.config, rr.names)
+	}
+	if len(members) == 0 {
+		return fmt.Errorf("%s: set is empty", key)
+	}
+	r.open[key] = true
+	defer delete(r.open, key)
+	// Copy rather than share the backing array, so that one member's
+	// chain does not show up in the next one's.
+	path = append(path[:len(path):len(path)], key)
+	for _, member := range members {
+		m, err := spec.ParseMember(member, ref.Spec)
+		if err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		if err := r.resolve(ctx, m, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// emit appends a layer, unless it is already there.
+func (r *resolver) emit(s spec.Spec) {
+	key := s.String()
+	if r.seen[key] {
+		return
+	}
+	r.seen[key] = true
+	r.out = append(r.out, s)
+}
+
+// repo opens a repository, updates it, and reads what resolution needs
+// from it. Repositories are read once per resolution, so a set naming
+// three layers of one repository fetches it once.
+func (r *resolver) repo(ctx context.Context, s spec.Spec) (*resolvedRepo, error) {
+	key := s.Repository().String()
+	if rr, ok := r.repos[key]; ok {
+		return rr, nil
+	}
+	_, rc, names, err := r.o.OpenRepoConfig(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	rr := &resolvedRepo{config: rc, names: names}
+	r.repos[key] = rr
+	return rr, nil
+}
+
+// OpenRepoConfig opens the repository a specification names, brings it up
+// to date, and reads its configuration and the layers it provides. The
+// repository need not be one of the configured layers': declaring a set
+// is a thing one does to a repository before adding anything from it.
+func (o *Over) OpenRepoConfig(ctx context.Context, s spec.Spec) (*gitrepo.Repo, *config.Repo, []string, error) {
+	repo, err := o.Repo(ctx, s)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := repo.Update(ctx); err != nil {
+		return nil, nil, nil, err
+	}
+	rc, err := config.LoadRepo(filepath.Join(repo.Dir(), "config.yaml"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	names, err := rc.LayerNames(repo.Dir())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return repo, rc, names, nil
+}
+
+// noLayer explains a layer that is not there. A set of the same name is
+// almost certainly what was meant, so it is named, spelled the way that
+// would have worked.
+func noLayer(ref spec.Ref, rc *config.Repo, names []string) error {
+	if _, ok := rc.Set(ref.Spec.Name); ok {
+		return fmt.Errorf("%s: %s is a set in %s, not a layer; name it as %s",
+			ref, ref.Spec.Name, ref.Spec.Repository(), spec.SetRef(ref.Spec, ref.Spec.Name))
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("%s: %s provides no layers; create one with 'over init %s'",
+			ref, ref.Spec.Repository(), ref)
+	}
+	return fmt.Errorf("%s: no such layer in %s (have %s); create it with 'over init %s'",
+		ref, ref.Spec.Repository(), strings.Join(names, ", "), ref)
+}
+
+// noSet explains a set that is not there, and likewise points at the
+// layer of the same name if there is one.
+func noSet(ref spec.Ref, rc *config.Repo, names []string) error {
+	if contains(names, ref.Spec.Name) {
+		return fmt.Errorf("%s: %s is a layer in %s, not a set; name it as %s",
+			ref, ref.Spec.Name, ref.Spec.Repository(), ref.Spec)
+	}
+	sets := rc.SetNames()
+	if len(sets) == 0 {
+		return fmt.Errorf("%s: %s declares no sets; create one with 'over set %s <layer>...'",
+			ref, ref.Spec.Repository(), ref)
+	}
+	return fmt.Errorf("%s: no such set in %s (have %s)",
+		ref, ref.Spec.Repository(), strings.Join(sets, ", "))
 }
 
 // Add inserts the given layers into the configuration. They are appended
@@ -488,19 +612,47 @@ func (o *Over) Add(ctx context.Context, args []string, before, root string) ([]s
 // Remove deletes the named layers from the configuration. It leaves the
 // local files and the layer's state alone: removing a layer stops over
 // from managing its files, it does not unmake them.
-func (o *Over) Remove(args []string) ([]spec.Spec, error) {
+//
+// A set or a bare repository removes what it stands for, so that a
+// machine can be taken apart the way it was put together. That costs a
+// fetch, since only the repository knows what a set means; a single layer
+// is matched against the configuration literally, and so can be removed
+// even when its repository has gone away.
+func (o *Over) Remove(ctx context.Context, args []string) ([]spec.Spec, error) {
 	var removed []spec.Spec
 	for _, arg := range args {
-		s, err := spec.Parse(arg)
+		ref, err := spec.ParseRef(arg)
 		if err != nil {
 			return nil, err
 		}
-		i := o.Config.Index(s.String())
-		if i < 0 {
-			return nil, fmt.Errorf("%s: not a configured layer", s)
+		if !ref.Set && ref.Spec.Name != "" {
+			i := o.Config.Index(ref.Spec.String())
+			if i < 0 {
+				return nil, fmt.Errorf("%s: not a configured layer", ref.Spec)
+			}
+			o.Config.Layers = append(o.Config.Layers[:i], o.Config.Layers[i+1:]...)
+			removed = append(removed, ref.Spec)
+			continue
 		}
-		o.Config.Layers = append(o.Config.Layers[:i], o.Config.Layers[i+1:]...)
-		removed = append(removed, s)
+		specs, err := o.ResolveSpecs(ctx, []string{arg})
+		if err != nil {
+			return nil, err
+		}
+		// A set whose members were not all added, or were removed one
+		// at a time, still removes the ones that are there.
+		var any bool
+		for _, s := range specs {
+			i := o.Config.Index(s.String())
+			if i < 0 {
+				continue
+			}
+			o.Config.Layers = append(o.Config.Layers[:i], o.Config.Layers[i+1:]...)
+			removed = append(removed, s)
+			any = true
+		}
+		if !any {
+			return nil, fmt.Errorf("%s: none of its layers are configured", ref)
+		}
 	}
 	if len(removed) == 0 {
 		return nil, nil

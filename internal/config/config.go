@@ -95,8 +95,14 @@ type Repo struct {
 	// A layer need not appear here; the defaults are imputed.
 	Layers map[string]RepoLayer `yaml:"layers,omitempty"`
 
-	// Sets names groups of layers. A set may be used wherever a layer
-	// name is expected, and expands to its members in order.
+	// Sets names groups of layers, keyed by set name. A set is named
+	// with a doubled colon, as "owner/repo::mac", so sets and layers
+	// do not share a namespace and neither can shadow the other.
+	//
+	// A member is written relative to this repository -- a bare name
+	// is one of its layers, "::name" another of its sets -- or as a
+	// whole specification, which is how a set reaches into another
+	// repository. Members expand in order, and a set may name a set.
 	Sets map[string][]string `yaml:"sets,omitempty"`
 }
 
@@ -163,6 +169,18 @@ func (r *Repo) IncludeBin(name string) bool { return r.Layers[name].IncludeBin }
 func (r *Repo) Set(name string) ([]string, bool) {
 	members, ok := r.Sets[name]
 	return members, ok
+}
+
+// SetNames returns the names of the sets the repository declares,
+// sorted. Unlike layers, a set exists only where it is declared: nothing
+// on disk implies one.
+func (r *Repo) SetNames() []string {
+	names := make([]string, 0, len(r.Sets))
+	for name := range r.Sets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // LayerNames returns the names of the layers the repository provides:

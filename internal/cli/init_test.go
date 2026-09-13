@@ -148,9 +148,9 @@ func TestInitErrors(t *testing.T) {
 	if code != exitError || !strings.Contains(stderr, "already exists") {
 		t.Errorf("existing layer: exit %d, stderr %q", code, stderr)
 	}
-	code, _, stderr = c.over("init", "mariusae/dotfiles:mac")
-	if code != exitError || !strings.Contains(stderr, "is a set") {
-		t.Errorf("set name: exit %d, stderr %q", code, stderr)
+	code, _, stderr = c.over("init", "mariusae/dotfiles::mac")
+	if code != exitError || !strings.Contains(stderr, "names a set") {
+		t.Errorf("set spelling: exit %d, stderr %q", code, stderr)
 	}
 	code, _, stderr = c.over("init", "mariusae/dotfiles")
 	if code != exitError || !strings.Contains(stderr, "name the layer to create") {

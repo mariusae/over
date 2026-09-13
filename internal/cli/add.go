@@ -25,8 +25,16 @@ sync materializes them. A layer is written as
 
 for example "mariusae/config:editors", the "editors" directory of the
 mariusae/config repository on GitHub. Naming a repository with no layer
-adds every layer it provides; naming a set defined in the repository's
-config.yaml adds the set's members, in order.
+adds every layer it provides.
+
+A set of layers is named with a doubled colon:
+
+	over add mariusae/config::mac
+
+which adds the set's members, in the order the set gives them. Sets are
+declared in their repository's config.yaml and may name layers in other
+repositories, so what a set comes to is not always obvious from the
+name: add prints each layer it added. See "over help set".
 
 Layers are ordered, and the last layer providing a file wins. Add puts
 new layers last, that is, at the highest precedence. The -before flag
@@ -71,7 +79,10 @@ var rmCmd = &Command{
 	Long: `Rm drops layers from the configuration. It touches neither
 the local files nor the layer's contents: over simply stops managing
 them. The layer's sync state is kept, so that adding it back picks up
-where it left off.`,
+where it left off.
+
+A set or a repository removes the layers it stands for, as adding one
+adds them, so that a machine comes apart the way it went together.`,
 	Run: runRm,
 }
 
@@ -83,7 +94,7 @@ func runRm(ctx context.Context, env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	removed, err := o.Remove(args)
+	removed, err := o.Remove(ctx, args)
 	if err != nil {
 		return err
 	}

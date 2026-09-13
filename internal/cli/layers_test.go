@@ -22,7 +22,7 @@ func newMultiLayer(t *testing.T) (*client, *repo) {
 
 func TestAddSet(t *testing.T) {
 	c, _ := newMultiLayer(t)
-	out := c.mustOver("add", "mariusae/config:mac")
+	out := c.mustOver("add", "mariusae/config::mac")
 	for _, want := range []string{"added mariusae/config:editors", "added mariusae/config:shell"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("add output missing %q:\n%s", want, out)
@@ -50,7 +50,7 @@ func TestAddUnknownLayer(t *testing.T) {
 	if code != exitError {
 		t.Errorf("exit %d, want %d", code, exitError)
 	}
-	if !strings.Contains(stderr, "no such layer or set") {
+	if !strings.Contains(stderr, "no such layer") {
 		t.Errorf("stderr = %q", stderr)
 	}
 }

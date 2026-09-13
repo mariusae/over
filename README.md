@@ -161,6 +161,55 @@ Each layer has a *root*, the directory its files are materialized under.
 The root is expanded for environment variables at sync time, so a layer
 rooted at `$HOME` follows whoever runs over.
 
+## Sets
+
+A *set* names a group of layers, and may be used wherever a layer is
+expected. It is written with a doubled colon:
+
+	$ over add mariusae/env::mac
+	added mariusae/env:editors
+	added mariusae/env:shell
+	added mariusae/work:overrides
+
+The doubled colon is the whole distinction between the two: layers and
+sets are separate namespaces, so a repository may hold both a layer and
+a set called `mac` and neither shadows the other. Nothing is inferred
+from the name, which also means a set cannot be eclipsed later by
+somebody committing a directory beside it.
+
+Sets live in the repository that declares them, so a set made on one
+machine is there for the next one:
+
+	$ over set mariusae/env::mac ::base mariusae/work:overrides
+	::base added to mariusae/env::mac
+	mariusae/work:overrides added to mariusae/env::mac
+	$ over set mariusae/env::mac
+	mariusae/env::mac  ::base, mariusae/work:overrides
+	    mariusae/env:editors
+	    mariusae/env:shell
+	    mariusae/work:overrides
+
+A member is written relative to the repository the set is declared in: a
+bare name is one of its layers, and `::name` is another of its sets. A
+whole specification names a layer or a set in another repository, so one
+set can gather an arrangement no single repository holds. Members expand
+in the order they are written, which is the precedence they get.
+
+That makes a set the thing to name when bringing up a machine: one
+argument standing for the whole arrangement. It is also the only place in
+over where a short argument expands into something you did not type, so
+`add` prints every layer it added, `set` prints what a set comes to, and
+a set that reaches itself is an error rather than a hang.
+
+Removing one takes back what it stood for:
+
+	$ over rm mariusae/env::mac
+
+A bare repository works the same way, and means every layer it provides.
+Removing a single layer is matched against the configuration literally,
+so a layer whose repository has gone away can still be removed; a set has
+to be resolved, since only the repository knows what it means.
+
 ## Tracking and deleting
 
 Sync discovers new files in a layer by itself. A new *local* file is
@@ -349,6 +398,7 @@ elements:
 	over track [-includebin] <layer> <path>...
 	over untrack <path>...
 	over rule [-ignore] [-rm] [-includebin] <layer> [pattern...]
+	over set [-rm] <set> [layer...]
 	over exclude [-rm] [path...]
 
 Run `over help <command>` for the details of any of them.
@@ -389,19 +439,25 @@ A layer repository provides one directory per layer. Its top-level
 	    etc:
 	        root: /etc
 	sets:
-	    mac:
+	    base:
 	        - editors
 	        - defaults
+	    mac:
+	        - ::base
 	        - dotconfig
-	    linux:
-	        - emacs
+	        - mariusae/work:overrides
 
 A layer need not appear under `layers:` at all; the default root,
-`$HOME`, is imputed. A *set* names a group of layers and may be used
-wherever a layer name is expected:
+`$HOME`, is imputed. The `sets:` map declares the repository's sets,
+keyed by name, each a list of members in the order they expand:
 
-	$ over add mariusae/config:mac    # adds editors, defaults, dotconfig
+	$ over add mariusae/config::mac   # adds the set's members, in order
+	$ over add mariusae/config:mac    # adds the layer called mac
 	$ over add mariusae/config        # adds every layer the repository provides
+
+`over set` writes this map, so there is no need to edit it by hand; like
+`over init` and `over rule`, it commits and pushes, and edits
+`config.yaml` in place so that comments survive.
 
 ## Environment
 
