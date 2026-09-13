@@ -415,6 +415,35 @@ settle_over() {
 	say "      a thunk is text, so a layer can carry it:"
 	say "        over track <layer> $BIN_DIR/over"
 	say "      after that, upgrading over everywhere is a commit"
+	other_over
+}
+
+# other_over reports an over somewhere else on the path.
+#
+# A layer that carries over puts it wherever the layer says, which need
+# not be --bin-dir. When the two differ this installer cannot tell that
+# the layer provided one, installs a second, and leaves two overs at
+# different pins with the path deciding between them -- and the one that
+# wins is not necessarily the one that works. Say so; it is not worth
+# guessing which was meant.
+other_over() {
+	found=$(
+		IFS=:
+		for dir in $CALLER_PATH; do
+			[ -n "$dir" ] || dir=.
+			[ "$dir" = "$BIN_DIR" ] && continue
+			if [ -x "$dir/over" ]; then
+				printf '%s\n' "$dir/over"
+				break
+			fi
+		done
+	)
+	[ -n "$found" ] || return 0
+	step "warning: there is another over at $found"
+	say "      it comes first on your PATH, so that is the one you will run."
+	say "      If a layer put it there, install into the same directory:"
+	say "        --bin-dir $(dirname "$found")"
+	say "      Two overs at different pins is the confusing case."
 }
 
 path_hint() {

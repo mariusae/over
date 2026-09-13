@@ -640,6 +640,16 @@ anything else the layers carry -- a thunk is text, and a layer holds
 text. Read the script before you pipe it anywhere; that is why it is
 short. `sh bootstrap.sh -n` prints the plan without doing any of it.
 
+If one of your layers carries over, install into the directory that layer
+puts it in:
+
+	... | sh -s -- --bin-dir ~/bin mariusae/env::mac
+
+The layer's copy then wins and the bootstrap's is dropped, which is what
+you want: one commit re-pins over on every machine. Install somewhere
+else and you get two, at whatever pins each was made with, with the path
+deciding between them. The installer says so when it notices.
+
 The versions it installs are pinned exactly, because a bootstrap that
 floated would hand two machines different software under the same
 command. `repin.sh` moves those pins forward:
