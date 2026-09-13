@@ -52,8 +52,24 @@ type Need struct {
 	// Write reports that over means to push, not only fetch. Reading a
 	// public repository needs nothing; writing one always needs a
 	// credential, whoever owns it.
+	//
+	// It also settles how sure over is of an installation gap. At a
+	// write barrier over has already read the layer, so the repository
+	// certainly exists and certainly can be reached -- if the app
+	// cannot get at it, installing is the answer and over says so
+	// plainly. A failed read is ambiguous, and over does not send
+	// somebody to an installation page over a typo.
 	Write bool
+
+	// Repos are the repositories over means to reach, as "owner/repo".
+	// A GitHub App reaches only what it has been installed on, which
+	// is a separate act from authorizing it, so knowing the names is
+	// what lets over tell the two apart.
+	Repos []string
 }
+
+// RepoName returns the "owner/repo" a specification names.
+func RepoName(s spec.Spec) string { return s.Owner + "/" + s.Repo }
 
 // ErrNoPrompt is returned when a credential is needed and over has no
 // way to ask for one, which is what happens in a script, a cron job, or
@@ -68,19 +84,27 @@ func (o *Over) Store() *auth.Store { return o.store }
 // publish what it has decided to publish. Reads are not included:
 // they are cheap to retry, so they are authorized lazily.
 func WriteNeeds(changes []Change) []Need {
-	seen := map[string]bool{}
-	var needs []Need
+	var (
+		needs []Need
+		at    = map[string]int{}
+		seen  = map[string]bool{}
+	)
 	for i := range changes {
 		c := &changes[i]
 		if c.Status != Push && c.Status != PushDelete {
 			continue
 		}
-		host := c.Layer.Spec.Host
-		if seen[host] {
-			continue
+		host, repo := c.Layer.Spec.Host, RepoName(c.Layer.Spec)
+		j, ok := at[host]
+		if !ok {
+			j = len(needs)
+			at[host] = j
+			needs = append(needs, Need{Host: host, Write: true})
 		}
-		seen[host] = true
-		needs = append(needs, Need{Host: host, Write: true})
+		if key := host + "/" + repo; !seen[key] {
+			seen[key] = true
+			needs[j].Repos = append(needs[j].Repos, repo)
+		}
 	}
 	return needs
 }
@@ -102,18 +126,73 @@ func (o *Over) Authorize(ctx context.Context, needs ...Need) error {
 		if err != nil {
 			return err
 		}
-		if had != nil {
-			continue
+		if had == nil {
+			if err := o.obtain(ctx, need.Host); err != nil {
+				return err
+			}
+			got = true
 		}
-		if err := o.obtain(ctx, need.Host); err != nil {
+		// A token says who you are; an installation says where over
+		// may act. Having the one is no guarantee of the other.
+		if err := o.ensureReach(ctx, need.Host, need.Repos, need.Write); err != nil {
 			return err
 		}
-		got = true
 	}
 	if got {
 		o.repos = map[string]*gitrepo.Repo{}
 	}
 	return nil
+}
+
+// ensureReach checks that the app can actually get at the repositories,
+// and sends the user to install it where it cannot.
+//
+// This only applies to a credential over obtained from the app itself. A
+// pasted token or one from the environment is not app-scoped, so there is
+// no installation to be missing, and asking the host about one would
+// invite a wrong answer.
+//
+// Diagnosis must never be what breaks an operation: a host that will not
+// answer questions about its installations gets the benefit of the
+// doubt, and whatever git had to say stands as the error.
+func (o *Over) ensureReach(ctx context.Context, host string, repos []string, sure bool) error {
+	if len(repos) == 0 {
+		return nil
+	}
+	t, err := o.token(ctx, host)
+	if err != nil || t == nil || t.Source != auth.FromDevice {
+		return nil
+	}
+	g := o.github(host)
+	reach, err := g.Reach(ctx, t)
+	if err != nil {
+		return nil
+	}
+	missing := auth.Missing(reach, repos)
+	if len(missing) == 0 {
+		return nil
+	}
+	// Prompt when over is sure enough to be worth somebody's time: at a
+	// write barrier, or when the app has not been installed anywhere at
+	// all, which leaves nothing else it could be.
+	if o.prompt != nil && (sure || reach.Installations == 0) {
+		return g.Install(ctx, t, missing, o.prompt)
+	}
+	return notInstalled(g, reach, missing, host)
+}
+
+// notInstalled explains an installation gap over will not act on by
+// itself, naming both things it could be.
+func notInstalled(g *auth.GitHub, reach *auth.Reach, missing []string, host string) error {
+	where := strings.Join(missing, ", ")
+	if uri := g.InstallURL(reach.Slug); uri != "" {
+		return fmt.Errorf("over is authorized at %s but not installed on %s;\n"+
+			"  install it at %s\n"+
+			"  (or check the name -- a repository you cannot see looks the same from here)",
+			host, where, uri)
+	}
+	return fmt.Errorf("over is authorized at %s but may not be installed on %s, "+
+		"and this build does not know the app's name to offer the page that installs it", host, where)
 }
 
 // wantsToken reports whether a token is any use for a host, which it is
@@ -251,13 +330,24 @@ func (o *Over) gitConfig(s spec.Spec) (gitrepo.Config, error) {
 // the second attempt failed anyway -- report that. Or over held a
 // credential all along and the host would not take it, which is the one
 // nothing here can fix: a revoked token, or one for the wrong account.
-func (o *Over) withAuth(ctx context.Context, host string, write bool, f func() error) error {
+func (o *Over) withAuth(ctx context.Context, host string, write bool, repos []string, f func() error) error {
 	err := f()
-	if err == nil || !errors.Is(err, gitrepo.ErrAuth) || !o.wantsToken(host) {
+	if err == nil || !o.wantsToken(host) {
+		return err
+	}
+	refused := errors.Is(err, gitrepo.ErrAuth)
+	if !refused && !errors.Is(err, gitrepo.ErrNotFound) {
 		return err
 	}
 	had, _ := o.token(ctx, host)
-	if aerr := o.Authorize(ctx, Need{Host: host, Write: write}); aerr != nil {
+	if had == nil && !refused {
+		// A repository reported missing, and no credential to find out
+		// whether that is the truth. explain says as much; there is
+		// nothing here to authorize against.
+		return err
+	}
+	need := Need{Host: host, Write: write, Repos: repos}
+	if aerr := o.Authorize(ctx, need); aerr != nil {
 		// The reason over could not authorize leads: it is the part
 		// with something to do about it.
 		return fmt.Errorf("%w (%w)", aerr, err)
@@ -337,7 +427,7 @@ func shellQuote(s string) string {
 // forget to handle a refused fetch, because it does not see one.
 func (o *Over) UpdateRepo(ctx context.Context, s spec.Spec) (*gitrepo.Repo, error) {
 	var repo *gitrepo.Repo
-	err := o.withAuth(ctx, s.Host, false, func() error {
+	err := o.withAuth(ctx, s.Host, false, []string{RepoName(s)}, func() error {
 		var err error
 		if repo, err = o.Repo(ctx, s); err != nil {
 			return err
@@ -358,7 +448,7 @@ func (o *Over) UpdateRepo(ctx context.Context, s spec.Spec) (*gitrepo.Repo, erro
 // was done. This catches the token that expired in between, and the push
 // to a layer no plan predicted.
 func (o *Over) PushRepo(ctx context.Context, s spec.Spec, repo *gitrepo.Repo) error {
-	return o.explain(s, o.withAuth(ctx, s.Host, true, func() error {
+	return o.explain(s, o.withAuth(ctx, s.Host, true, []string{RepoName(s)}, func() error {
 		return repo.Push(ctx)
 	}))
 }

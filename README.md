@@ -441,6 +441,44 @@ is never asked to authorize anything.
 	$ over auth -status
 	github.com  mariusae  expires in 8h0m0s
 
+### Authorizing is not installing
+
+On GitHub these are two separate acts, and they can be out of step.
+Authorizing says who you are; installing says which repositories over may
+act on, and it is a page the user visits -- there is no API to do it for
+them. So a token can be perfectly valid and still reach nothing.
+
+over notices, because it knows which repositories it is about to need:
+
+	$ over sync
+
+	over is authorized, but not installed on mariusae/env.
+
+	    open  https://github.com/apps/over/installations/new
+
+	choose those repositories there. waiting up to 10m...
+	.zshrc to mariusae/config:editors
+
+The token does not change when you submit that page. An installation is
+not a permission the token carries but a place it may be used, so the
+credential over already holds simply starts working.
+
+over offers that page when it is sure enough to be worth your time: at a
+write barrier, where it has already read the layer and so knows the
+repository is there; or when the app has never been installed anywhere,
+which leaves nothing else it could be. A *read* that fails is ambiguous
+-- a repository you cannot see looks exactly like one that is not there
+-- so over says both rather than sending you off over a typo:
+
+	$ over add mariusae/enw:editors
+	over: over is authorized at github.com but not installed on mariusae/enw;
+	  install it at https://github.com/apps/over/installations/new
+	  (or check the name -- a repository you cannot see looks the same from here)
+
+None of this applies to a token from `over auth -token` or the
+environment. Those are not app credentials, so there is no installation
+to be missing, and over does not go looking for one.
+
 ### A private repository looks like a missing one
 
 GitHub answers a request for a repository you may not see much the way it
@@ -554,6 +592,10 @@ keyed by name, each a list of members in the order they expand:
 	              "always" to offer to even without one
 	OVER_TOKEN    a credential to use in place of "over auth";
 	              $GITHUB_TOKEN and $GH_TOKEN are read too
+	OVER_CLIENT_ID  the GitHub App to authorize as, overriding the one
+	              this build was made with
+	OVER_APP_SLUG   that app's name in a URL, which is how over
+	              addresses the page that installs it
 	OVER_URL      a format string for repository URLs, taking the host,
 	              owner, and repository as %[1]s, %[2]s, and %[3]s;
 	              the default is https://%[1]s/%[2]s/%[3]s.git

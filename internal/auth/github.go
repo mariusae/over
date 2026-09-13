@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -37,18 +38,41 @@ var ErrNoClientID = errors.New("this build of over has no GitHub client id; " +
 // ErrDenied is returned when the user declines the authorization.
 var ErrDenied = errors.New("authorization was declined")
 
-// A Prompt is what the user has to do to finish authorizing over. The
-// caller shows it however it likes; this package waits.
+// A PromptKind is which of the two things the user has to go and do.
+// They are separate acts on GitHub and can be out of step: authorizing
+// says who you are, installing says where over may act.
+type PromptKind int
+
+const (
+	// PromptAuthorize asks the user to authorize over at the host.
+	PromptAuthorize PromptKind = iota
+
+	// PromptInstall asks them to install the app on the repositories
+	// over needs, which is a page rather than an API and so cannot be
+	// done for them.
+	PromptInstall
+)
+
+// A Prompt is what the user has to do next. The caller shows it however
+// it likes; this package waits for the host to say it was done.
 type Prompt struct {
+	// Kind is what is being asked for.
+	Kind PromptKind
+
 	// URI is the page the user opens.
 	URI string
 
-	// Code is what they type into it. The device flow deliberately
-	// does not put the code in the URI, so that clicking a link is not
-	// on its own enough to authorize anything.
+	// Code is what they type into it, for an authorization. The device
+	// flow deliberately does not put the code in the URI, so that
+	// clicking a link is not on its own enough to authorize anything.
+	// An installation has no code.
 	Code string
 
-	// Expires is when the code stops working.
+	// Repos are the repositories an installation is wanted for, as
+	// "owner/repo".
+	Repos []string
+
+	// Expires is when the code, or over's patience, runs out.
 	Expires time.Time
 }
 
@@ -97,7 +121,17 @@ func (g *GitHub) clientID() string {
 	if g.ClientID != "" {
 		return g.ClientID
 	}
-	return ClientID
+	return envOr("OVER_CLIENT_ID", ClientID)
+}
+
+// envOr returns an environment variable, or def where it is unset. The
+// app over authenticates as is settled at build time, and overridable at
+// run time so that a private deployment needs no fork.
+func envOr(name, def string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return def
 }
 
 func (g *GitHub) now() time.Time {
@@ -188,6 +222,15 @@ func (g *GitHub) Authorize(ctx context.Context, show func(Prompt) error) (*Token
 	}
 	var code deviceCode
 	if err := g.post(ctx, g.base()+"/login/device/code", form, &code); err != nil {
+		// A host that will not start a device flow at all is nearly
+		// always one of two things, and neither is guessable from
+		// "404". Say both.
+		var se *statusError
+		if errors.As(err, &se) && (se.Code == http.StatusNotFound || se.Code == http.StatusUnauthorized) {
+			return nil, fmt.Errorf("%w\n  check the client id (%s), "+
+				"and that the app has device flow enabled in its settings",
+				err, g.clientID())
+		}
 		return nil, err
 	}
 	if code.DeviceCode == "" || code.UserCode == "" {
@@ -201,7 +244,12 @@ func (g *GitHub) Authorize(ctx context.Context, show func(Prompt) error) (*Token
 	if code.ExpiresIn == 0 {
 		expires = g.now().Add(15 * time.Minute)
 	}
-	if err := show(Prompt{URI: code.VerificationURI, Code: code.UserCode, Expires: expires}); err != nil {
+	if err := show(Prompt{
+		Kind:    PromptAuthorize,
+		URI:     code.VerificationURI,
+		Code:    code.UserCode,
+		Expires: expires,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -328,13 +376,23 @@ func (g *GitHub) post(ctx context.Context, endpoint string, form url.Values, out
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("%s: %s", endpoint, resp.Status)
+		return &statusError{URL: endpoint, Status: resp.Status, Code: resp.StatusCode}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("%s: %w", endpoint, err)
 	}
 	return nil
 }
+
+// A statusError is a reply that was not a success, kept typed so that
+// the caller can tell a misconfiguration from a host having a bad day.
+type statusError struct {
+	URL    string
+	Status string
+	Code   int
+}
+
+func (e *statusError) Error() string { return e.URL + ": " + e.Status }
 
 func firstNonEmpty(ss ...string) string {
 	for _, s := range ss {

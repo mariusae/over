@@ -362,3 +362,210 @@ func TestSaveTokenChecksIt(t *testing.T) {
 		t.Error("an empty token was accepted")
 	}
 }
+
+// TestWriteNeedsCarriesRepos checks that the plan says which
+// repositories will be written, which is what lets over tell a missing
+// authorization from a missing installation.
+func TestWriteNeedsCarriesRepos(t *testing.T) {
+	bin := &Layer{Spec: mustSpec(t, "mariusae/env:bin")}
+	editors := &Layer{Spec: mustSpec(t, "mariusae/env:editors")}
+	work := &Layer{Spec: mustSpec(t, "mariusae/work:overrides")}
+	elsewhere := &Layer{Spec: mustSpec(t, "git.example.com/m/c:etc")}
+	needs := WriteNeeds([]Change{
+		{Layer: bin, Status: Push},
+		{Layer: editors, Status: Push},    // same repository, counted once
+		{Layer: work, Status: PushDelete}, // same host, another repository
+		{Layer: elsewhere, Status: Push},
+		{Layer: bin, Status: Pull}, // not going anywhere
+	})
+	if len(needs) != 2 {
+		t.Fatalf("WriteNeeds = %+v, want one per host", needs)
+	}
+	if got := strings.Join(needs[0].Repos, ","); got != "mariusae/env,mariusae/work" {
+		t.Errorf("github.com repos = %q", got)
+	}
+	if got := strings.Join(needs[1].Repos, ","); got != "m/c" {
+		t.Errorf("other host repos = %q", got)
+	}
+}
+
+func TestRepoName(t *testing.T) {
+	if got := RepoName(mustSpec(t, "git.example.com/m/c:etc")); got != "m/c" {
+		t.Errorf("RepoName = %q, want m/c", got)
+	}
+}
+
+// installFake serves the installation endpoints, with nothing installed.
+func installFake(t *testing.T, covered []string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/user/installations":
+			if len(covered) == 0 {
+				fmt.Fprint(w, `{"total_count":0,"installations":[]}`)
+				return
+			}
+			fmt.Fprint(w, `{"total_count":1,"installations":[`+
+				`{"id":7,"repository_selection":"selected","app_slug":"over",`+
+				`"account":{"login":"mariusae"}}]}`)
+		case strings.HasPrefix(r.URL.Path, "/user/installations/"):
+			var items []string
+			for _, name := range covered {
+				items = append(items, `{"full_name":"`+name+`"}`)
+			}
+			fmt.Fprintf(w, `{"total_count":%d,"repositories":[%s]}`,
+				len(items), strings.Join(items, ","))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// pointAt makes over authorize against a fake host.
+func pointAt(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	old := github
+	github = func(host string) *auth.GitHub {
+		return &auth.GitHub{
+			Host: host, ClientID: "Iv1.test",
+			BaseURL: srv.URL, APIURL: srv.URL, Now: timeNow,
+			Sleep: func(context.Context, time.Duration) error { return nil },
+		}
+	}
+	t.Cleanup(func() { github = old })
+}
+
+// deviceToken stores a credential of the kind the app hands out, which is
+// the only kind an installation applies to.
+func deviceToken(t *testing.T, o *Over) {
+	t.Helper()
+	if err := o.store.Save(&auth.Token{
+		Host: "github.com", Access: "gho_x", Login: "mariusae", Source: auth.FromDevice,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEnsureReachPromptsWhenSure checks the write barrier: over has
+// already read the layer, so an installation gap is the only thing it
+// can be, and over sends the user to fix it.
+func TestEnsureReachPromptsWhenSure(t *testing.T) {
+	srv := installFake(t, []string{"mariusae/env"})
+	defer srv.Close()
+	pointAt(t, srv)
+	t.Setenv("OVER_APP_SLUG", "over")
+
+	o := newTestOver(t)
+	deviceToken(t, o)
+	var shown auth.Prompt
+	o.prompt = func(p auth.Prompt) error {
+		shown = p
+		// The user installs it on the other repository too; the fake
+		// cannot change, so this asserts the prompt and gives up.
+		return errors.New("stop here")
+	}
+	err := o.ensureReach(context.Background(), "github.com", []string{"mariusae/env", "mariusae/work"}, true)
+	if err == nil || !strings.Contains(err.Error(), "stop here") {
+		t.Fatalf("err = %v", err)
+	}
+	if shown.Kind != auth.PromptInstall {
+		t.Errorf("prompt kind = %v", shown.Kind)
+	}
+	if len(shown.Repos) != 1 || shown.Repos[0] != "mariusae/work" {
+		t.Errorf("prompt named %v, want only the repository not covered", shown.Repos)
+	}
+}
+
+// TestEnsureReachDiagnosesWhenUnsure checks that a failed read does not
+// railroad somebody to an installation page: it could as easily be a
+// typo, so over says both.
+func TestEnsureReachDiagnosesWhenUnsure(t *testing.T) {
+	srv := installFake(t, []string{"mariusae/env"})
+	defer srv.Close()
+	pointAt(t, srv)
+	t.Setenv("OVER_APP_SLUG", "over")
+
+	o := newTestOver(t)
+	deviceToken(t, o)
+	o.prompt = func(auth.Prompt) error { return errors.New("should not be shown") }
+
+	err := o.ensureReach(context.Background(), "github.com", []string{"mariusae/typo"}, false)
+	if err == nil {
+		t.Fatal("no complaint about a repository the app cannot reach")
+	}
+	for _, want := range []string{"not installed on mariusae/typo", "installations/new", "check the name"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err missing %q: %v", want, err)
+		}
+	}
+}
+
+// TestEnsureReachPromptsWithNoInstallations checks the one case a read
+// is sure about: the app has not been installed anywhere at all, so
+// there is nothing else it could be.
+func TestEnsureReachPromptsWithNoInstallations(t *testing.T) {
+	srv := installFake(t, nil)
+	defer srv.Close()
+	pointAt(t, srv)
+	t.Setenv("OVER_APP_SLUG", "over")
+
+	o := newTestOver(t)
+	deviceToken(t, o)
+	shown := false
+	o.prompt = func(p auth.Prompt) error {
+		shown = p.Kind == auth.PromptInstall
+		return errors.New("stop here")
+	}
+	if err := o.ensureReach(context.Background(), "github.com", []string{"mariusae/env"}, false); err == nil {
+		t.Fatal("no attempt to install")
+	}
+	if !shown {
+		t.Error("over did not offer to install when it had never been installed")
+	}
+}
+
+// TestEnsureReachIgnoresOtherCredentials checks that a token over did not
+// get from the app is left alone: there is no installation to be missing,
+// and asking the host about one invites a wrong answer.
+func TestEnsureReachIgnoresOtherCredentials(t *testing.T) {
+	srv := installFake(t, nil)
+	defer srv.Close()
+	pointAt(t, srv)
+
+	o := newTestOver(t)
+	o.prompt = func(auth.Prompt) error { return errors.New("should not be shown") }
+	for _, source := range []auth.Source{auth.FromPaste, auth.FromEnv, ""} {
+		if err := o.store.Save(&auth.Token{Host: "github.com", Access: "x", Source: source}); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.ensureReach(context.Background(), "github.com", []string{"mariusae/env"}, true); err != nil {
+			t.Errorf("source %q: %v", source, err)
+		}
+	}
+}
+
+// TestEnsureReachSurvivesASilentHost checks that diagnosis is never what
+// breaks an operation.
+func TestEnsureReachSurvivesASilentHost(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	pointAt(t, srv)
+
+	o := newTestOver(t)
+	deviceToken(t, o)
+	o.prompt = func(auth.Prompt) error { return errors.New("should not be shown") }
+	if err := o.ensureReach(context.Background(), "github.com", []string{"mariusae/env"}, true); err != nil {
+		t.Errorf("a host that would not answer broke the operation: %v", err)
+	}
+}
+
+// TestEnsureReachNoRepos checks that a need naming nothing asks nothing.
+func TestEnsureReachNoRepos(t *testing.T) {
+	o := newTestOver(t)
+	if err := o.ensureReach(context.Background(), "github.com", nil, true); err != nil {
+		t.Errorf("err = %v", err)
+	}
+}

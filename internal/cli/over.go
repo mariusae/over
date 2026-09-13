@@ -250,6 +250,17 @@ func promptFunc(env *Env) func(auth.Prompt) error {
 		}
 	}
 	return func(p auth.Prompt) error {
+		if p.Kind == auth.PromptInstall {
+			fmt.Fprintf(env.Stderr, "\nover is authorized, but not installed on %s.\n\n",
+				strings.Join(p.Repos, ", "))
+			fmt.Fprintf(env.Stderr, "    open  %s\n\n", p.URI)
+			fmt.Fprintf(env.Stderr, "choose those repositories there. waiting")
+			if !p.Expires.IsZero() {
+				fmt.Fprintf(env.Stderr, " up to %s", time.Until(p.Expires).Round(time.Minute))
+			}
+			fmt.Fprintf(env.Stderr, "...\n")
+			return nil
+		}
 		fmt.Fprintf(env.Stderr, "\nover needs your permission to reach the layers.\n\n")
 		fmt.Fprintf(env.Stderr, "    open  %s\n", p.URI)
 		fmt.Fprintf(env.Stderr, "    code  %s\n\n", p.Code)
