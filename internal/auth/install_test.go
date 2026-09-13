@@ -192,6 +192,7 @@ func TestInstallWaits(t *testing.T) {
 // TestInstallNeedsASlug checks that over says what is missing rather
 // than offering a broken link.
 func TestInstallNeedsASlug(t *testing.T) {
+	defer withAppSlug("")()
 	f := &fakeInstalls{installs: map[int64][]string{}, all: map[int64]bool{}}
 	srv := f.serve(t)
 	defer srv.Close()
@@ -205,6 +206,7 @@ func TestInstallNeedsASlug(t *testing.T) {
 }
 
 func TestInstallURL(t *testing.T) {
+	defer withAppSlug("")()
 	g := &GitHub{Host: "github.test"}
 	if got := g.InstallURL(""); got != "" {
 		t.Errorf("InstallURL with no slug anywhere = %q, want empty", got)
@@ -220,6 +222,7 @@ func TestInstallURL(t *testing.T) {
 }
 
 func TestClientIDFromEnv(t *testing.T) {
+	defer withClientID("")()
 	g := &GitHub{Host: "github.test"}
 	if g.clientID() != "" {
 		t.Errorf("clientID = %q, want empty in a build with none", g.clientID())

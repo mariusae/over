@@ -495,6 +495,32 @@ func (o *Over) Hosts() ([]string, error) {
 	return hosts, nil
 }
 
+// RepoNames returns the repositories the configured layers live in on a
+// host, as "owner/repo". It is what "over auth" checks the app can reach:
+// authorizing and installing are separate acts, and the useful thing to
+// report is whether the layers this machine actually has are covered.
+func (o *Over) RepoNames(host string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, entry := range o.Config.Layers {
+		s, err := spec.Parse(entry.Layer)
+		if err != nil {
+			return nil, err
+		}
+		if s.Host != host {
+			continue
+		}
+		name := RepoName(s)
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // Vetoes are the paths over refuses to manage whatever the configuration
 // says. The exclusion list is the user's to edit -- an empty one is
 // respected as written -- but the token store is not an opinion. A

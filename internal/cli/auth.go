@@ -119,7 +119,14 @@ func runAuth(ctx context.Context, env *Env, args []string) error {
 		return nil
 	}
 
-	if err := o.Authorize(ctx, over.Need{Host: host, Write: true}); err != nil {
+	// Naming the layers' repositories is what lets the command report
+	// the second half of the job: over may be authorized and still not
+	// installed where the layers are.
+	repos, err := o.RepoNames(host)
+	if err != nil {
+		return err
+	}
+	if err := o.Authorize(ctx, over.Need{Host: host, Write: true, Repos: repos}); err != nil {
 		return err
 	}
 	t, err := o.Store().Load(host)

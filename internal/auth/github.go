@@ -19,11 +19,16 @@ const DefaultHost = "github.com"
 // time with -ldflags "-X .../internal/auth.ClientID=..." and at run time
 // with $OVER_CLIENT_ID.
 //
-// It is empty in a build that has not been given one, and over says so
-// rather than sending the user to a broken authorization page. A token
-// pasted into "over auth -token" needs no app at all, which is how a
-// build with no client id still reaches a private repository.
-var ClientID = ""
+// A client id is public by design. The device flow exists for clients
+// that cannot keep a secret -- there is no client secret in any request
+// over makes, and the app's private key, which authenticates as the app
+// itself across every installation, is not something a program handed to
+// other people may ever hold.
+//
+// Cleared, over says so rather than sending the user to a broken
+// authorization page; a token pasted into "over auth -token" needs no app
+// at all.
+var ClientID = "Iv23liVe8iGVzGURD9r2"
 
 // Scopes is what over asks for. A GitHub App's permissions are settled
 // when the app is installed, not when it is authorized, so this is empty

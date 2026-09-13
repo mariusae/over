@@ -24,7 +24,7 @@ import (
 //
 // With no slug, over still detects the gap and says the app may not be
 // installed. It just cannot offer the link.
-var AppSlug = ""
+var AppSlug = "overcfg"
 
 // An Installation is one installation of the app: an account that has
 // added it, and what it was given access to there.

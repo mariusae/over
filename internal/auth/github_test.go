@@ -171,6 +171,7 @@ func TestAuthorizeShowFailureStops(t *testing.T) {
 }
 
 func TestAuthorizeNeedsClientID(t *testing.T) {
+	defer withClientID("")()
 	g := &GitHub{Host: "github.test"}
 	if _, err := g.Authorize(context.Background(), func(Prompt) error { return nil }); !errors.Is(err, ErrNoClientID) {
 		t.Errorf("err = %v, want ErrNoClientID", err)
@@ -232,4 +233,19 @@ func TestAPIURL(t *testing.T) {
 			t.Errorf("%q: api = %q, want %q", test.host, got, test.api)
 		}
 	}
+}
+
+// withClientID replaces the built-in client id for one test, and returns
+// the function that puts it back.
+func withClientID(id string) func() {
+	old := ClientID
+	ClientID = id
+	return func() { ClientID = old }
+}
+
+// withAppSlug does the same for the app's slug.
+func withAppSlug(slug string) func() {
+	old := AppSlug
+	AppSlug = slug
+	return func() { AppSlug = old }
 }
