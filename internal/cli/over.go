@@ -238,16 +238,10 @@ no "..." names one file, or, if it is a directory, everything under it.`
 // cron job that turns out to need a credential fails saying which
 // command to run, rather than blocking on a browser nobody will open.
 // $OVER_AUTH=never refuses even where there is a terminal, which is how
-// a script says it would rather have the error.
+// a script says it would rather have the error; "always" insists.
 func promptFunc(env *Env) func(auth.Prompt) error {
-	switch os.Getenv("OVER_AUTH") {
-	case "never":
+	if !promptable(os.Stderr) {
 		return nil
-	case "always":
-	default:
-		if !isTerminal(os.Stdin) || !isTerminal(os.Stderr) {
-			return nil
-		}
 	}
 	return func(p auth.Prompt) error {
 		if p.Kind == auth.PromptInstall {
@@ -271,6 +265,30 @@ func promptFunc(env *Env) func(auth.Prompt) error {
 		fmt.Fprintf(env.Stderr, "...\n")
 		return nil
 	}
+}
+
+// promptable reports whether over may stop and show somebody something,
+// which turns on one question: can it be seen?
+//
+// Only the output stream is consulted, and this is the whole of the
+// point. Authorizing reads nothing -- over prints a link and a code and
+// then waits on the host, not on the keyboard -- so an input stream that
+// is not a terminal says nothing about whether anybody is watching. The
+// case that proves it is the one over is installed by:
+//
+//	curl -fsSL .../bootstrap.sh | sh -s -- mariusae/env::mac
+//
+// There, stdin is the pipe carrying the script. Asking about it gets the
+// answer "no terminal" in front of somebody sitting there reading the
+// output.
+func promptable(out *os.File) bool {
+	switch os.Getenv("OVER_AUTH") {
+	case "never":
+		return false
+	case "always":
+		return true
+	}
+	return isTerminal(out)
 }
 
 // isTerminal reports whether there is a person on the other end of f.

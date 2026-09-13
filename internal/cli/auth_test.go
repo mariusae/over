@@ -260,3 +260,69 @@ func TestTokenStoreIsNeverLayerContent(t *testing.T) {
 		t.Errorf("the token went missing: %v", err)
 	}
 }
+
+// TestPromptableIgnoresStdin is the regression test for the way over is
+// actually installed:
+//
+//	curl -fsSL .../bootstrap.sh | sh -s -- mariusae/env::mac
+//
+// There stdin is the pipe carrying the script, while a person sits
+// watching the output. Authorizing reads nothing, so only the output
+// stream has any bearing on whether anybody can see the prompt.
+func TestPromptableIgnoresStdin(t *testing.T) {
+	pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("no pty available: %v", err)
+	}
+	defer pty.Close()
+
+	// A terminal to write to is enough, whatever stdin is.
+	if !promptable(pty) {
+		t.Error("over would not prompt on a terminal")
+	}
+
+	// A pipe is not somewhere a person can read a link.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if promptable(w) {
+		t.Error("over would prompt into a pipe")
+	}
+
+	// /dev/null is a character device, and is what a cron job gets.
+	nul, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nul.Close()
+	if promptable(nul) {
+		t.Error("over would prompt into /dev/null")
+	}
+}
+
+func TestPromptableOverrides(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	t.Setenv("OVER_AUTH", "always")
+	if !promptable(w) {
+		t.Error("OVER_AUTH=always did not insist")
+	}
+	t.Setenv("OVER_AUTH", "never")
+	if promptable(w) {
+		t.Error("OVER_AUTH=never did not refuse")
+	}
+	if pty, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0); err == nil {
+		defer pty.Close()
+		if promptable(pty) {
+			t.Error("OVER_AUTH=never did not refuse a terminal")
+		}
+	}
+}

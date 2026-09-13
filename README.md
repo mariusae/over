@@ -402,7 +402,18 @@ moment at which a sync is half done and waiting for a browser.
 
 **When over does not ask.** Where there is nobody to ask. A cron job or a
 script gets an error naming the command to run, rather than a wait that
-will never end. `OVER_AUTH=never` refuses even where there is a terminal.
+will never end. `OVER_AUTH=never` refuses even where there is a terminal;
+`always` insists even where there is not.
+
+Whether anybody is there is judged by the stream over would write to, and
+not by its input. Authorizing reads nothing -- over prints a link and
+then waits on the host, not on the keyboard -- so a standard input that
+is not a terminal says nothing about who is watching. Which matters,
+because the way over gets installed is
+
+	curl -fsSL .../bootstrap.sh | sh -s -- mariusae/env::mac
+
+where standard input is the pipe carrying the script.
 
 	over auth                  authorize over at github.com
 	over auth -status          what over holds, for every host
