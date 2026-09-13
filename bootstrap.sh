@@ -381,8 +381,15 @@ main() {
 
 	check_layer_access
 
+	# Whatever happens from here, the machine ends up with an over on
+	# it. A first sync conflicts whenever the machine already had a file
+	# that a layer also provides, which is the ordinary case rather than
+	# a failed installation -- and an installer that responds to it by
+	# telling you to run "over diff", having declined to install over,
+	# is no use to anybody.
+	rc=0
 	step "over: configuring $*"
-	"$STAGE/over" add "$@" >&2
+	"$STAGE/over" add "$@" >&2 || rc=$?
 
 	# The first sync on a fresh machine has nothing to publish, so it is
 	# a pull in everything but name. over has no flag to say so yet.
@@ -390,11 +397,33 @@ main() {
 	# If a layer turns out to be private, over stops here and sends you
 	# to the host; it asks before it writes anything, so there is no
 	# half-done state to worry about either way.
-	step "over: syncing"
-	"$STAGE/over" sync >&2
+	if [ "$rc" = 0 ]; then
+		step "over: syncing"
+		"$STAGE/over" sync >&2 || rc=$?
+	fi
 
 	settle_over
 	path_hint
+	[ "$rc" = 0 ] || unfinished "$rc"
+	return "$rc"
+}
+
+# unfinished explains a first sync that did not go cleanly. over is on
+# the machine by the time this is printed, which is the whole point: the
+# advice names commands that can now be run.
+unfinished() {
+	step "the first sync did not finish (exit $1) -- but over is installed"
+	say "      A file this machine already had, which a layer also provides, is a"
+	say "      conflict: over will not overwrite what it did not put there. Look,"
+	say "      then choose a side:"
+	say "        over status          what is outstanding"
+	say "        over diff            how they differ"
+	say "        over reset <path>    take the layer's copy"
+	say "        over ack <path>      keep this machine's, and publish it"
+	say "        over sync            once they are settled"
+	say "      If a layer provides over itself and the sync never got that far,"
+	say "      the copy installed just now is in its way; 'over reset' on it"
+	say "      takes the layer's."
 }
 
 # settle_over decides which over the machine keeps. If a layer provided
