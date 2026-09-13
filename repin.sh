@@ -2,16 +2,23 @@
 #
 # Re-pin bootstrap.sh at the current version of what it installs.
 #
-#	./repin.sh            the newest over, and the newest thunk
+#	./repin.sh            this checkout's HEAD, and the newest thunk
 #	./repin.sh v0.2.0     a particular over
 #	./repin.sh -n         say what would change, change nothing
 #
-# The pins are asked for rather than typed. "thunk create" resolves a
-# coordinate against the module proxy and writes the manifest it would
-# build from, so the version and the module hash come from the thing that
-# will do the building -- not from a person copying two hashes across a
-# terminal, which is the way a pin comes to name something nobody
-# intended.
+# The pins are asked for rather than typed. "thunk create" writes the
+# manifest it would build from, so the version and the module hash come
+# from the thing that will do the building -- not from a person copying
+# two hashes across a terminal, which is the way a pin comes to name
+# something nobody intended.
+#
+# HEAD is named explicitly, rather than asking the proxy for the newest
+# thing it has. The module proxy caches what it calls latest, and that
+# cache lags a push by long enough to be confusing: it will happily serve
+# a commit by exact version while still reporting an older one as latest.
+# So "the newest over" means the one in this checkout, which is the only
+# reading that does not depend on somebody else's cache. It has to have
+# been pushed, since the proxy can only serve what it can fetch.
 #
 set -eu
 
@@ -46,9 +53,31 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 # --- over, as thunk resolves it -----------------------------------------
 
-coordinate=$PACKAGE${VERSION:+@$VERSION}
+# pseudo_version returns the version the module proxy knows a commit by:
+# v0.0.0, its committer date in UTC, and the first twelve of its hash.
+pseudo_version() {
+	stamp=$(TZ=UTC git show -s --date=format-local:%Y%m%d%H%M%S --format=%cd "$1")
+	printf 'v0.0.0-%s-%s\n' "$stamp" "$(printf '%s' "$1" | cut -c1-12)"
+}
+
+head_commit=
+if [ -z "$VERSION" ]; then
+	head_commit=$(git rev-parse HEAD)
+	VERSION=$(pseudo_version "$head_commit")
+	if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+		printf 'repin: warning: uncommitted changes are not in %s\n' "$VERSION" >&2
+	fi
+fi
+
+coordinate=$PACKAGE@$VERSION
 printf 'resolving %s\n' "$coordinate" >&2
-thunk create "$coordinate" "$tmp/over" >&2
+if ! thunk create "$coordinate" "$tmp/over" >&2; then
+	if [ -n "$head_commit" ]; then
+		die "the proxy could not serve $VERSION.
+  It can only fetch what has been pushed; check that $(printf '%s' "$head_commit" | cut -c1-12) is on the remote."
+	fi
+	die "the proxy could not serve $VERSION"
+fi
 
 # field reads one key out of the generated manifest.
 field() {
@@ -98,7 +127,7 @@ set_pin OVER_GO "$over_go"
 [ -z "$thunk_commit" ] || set_pin THUNK_COMMIT "$thunk_commit"
 
 if cmp -s "$BOOTSTRAP" "$tmp/work"; then
-	printf '%s is already current\n' "$BOOTSTRAP" >&2
+	printf '%s already pins %s\n' "$BOOTSTRAP" "$over_version" >&2
 	exit 0
 fi
 

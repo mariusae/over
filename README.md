@@ -648,11 +648,17 @@ command. `repin.sh` moves those pins forward:
 	./repin.sh              # the newest over, and the newest thunk
 	./repin.sh v0.2.0       # a particular over
 
-The pins are asked for rather than typed: `thunk create` resolves the
-coordinate against the module proxy and writes the manifest it would
-build from, so the version and the module hash come from the thing that
-does the building. Re-pinning needs the commit to be pushed first -- the
-proxy can only serve what it can fetch.
+The pins are asked for rather than typed: `thunk create` writes the
+manifest it would build from, so the version and the module hash come
+from the thing that does the building.
+
+`repin.sh` names this checkout's HEAD, rather than asking the proxy for
+the newest thing it has. The module proxy caches what it calls latest,
+and that cache lags a push by long enough to be confusing -- it will
+serve a commit by exact version while still reporting an older one as
+latest. So "the newest over" means the one in this checkout, which is the
+only reading that does not depend on somebody else's cache. It does have
+to have been pushed: the proxy can only serve what it can fetch.
 
 ## Testing
 
