@@ -18,6 +18,12 @@ type client struct {
 	root    string
 	home    string
 	remotes string
+
+	// url is the $OVER_URL template, pointing at the local bare
+	// repositories. Empty leaves it unset, so that over reaches its
+	// hosts the way it does in earnest -- which is what the tests
+	// about credentials need, since a token is no use for a file URL.
+	url string
 }
 
 // newClient sets up an over client whose repositories are local bare
@@ -34,6 +40,7 @@ func newClient(t *testing.T) *client {
 		home:    filepath.Join(root, "home"),
 		remotes: filepath.Join(root, "remotes"),
 	}
+	c.url = "file://" + c.remotes + "/%[2]s/%[3]s.git"
 	mkdir(t, c.home)
 	mkdir(t, c.remotes)
 	c.apply()
@@ -51,7 +58,7 @@ func newClient(t *testing.T) *client {
 // for over running on another machine.
 func (c *client) sub(t *testing.T) *client {
 	t.Helper()
-	other := &client{t: t, root: c.root, home: filepath.Join(c.root, "home2"), remotes: c.remotes}
+	other := &client{t: t, root: c.root, home: filepath.Join(c.root, "home2"), remotes: c.remotes, url: c.url}
 	mkdir(t, other.home)
 	return other
 }
@@ -63,7 +70,7 @@ func (c *client) apply() {
 	c.t.Setenv("HOME", c.home)
 	c.t.Setenv("OVER_HOME", filepath.Join(c.home, ".config", "over"))
 	c.t.Setenv("OVER_CACHE", filepath.Join(c.home, ".cache", "over"))
-	c.t.Setenv("OVER_URL", "file://"+c.remotes+"/%[2]s/%[3]s.git")
+	c.t.Setenv("OVER_URL", c.url)
 }
 
 // over runs a command in the client's home directory.

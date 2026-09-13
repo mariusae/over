@@ -150,14 +150,17 @@ func TestDefaultURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := DefaultURL(s), "git@github.com:mariusae/env.git"; got != want {
-		t.Errorf("DefaultURL = %q, want %q", got, want)
+	if got, want := HTTPSURL(s), "https://github.com/mariusae/env.git"; got != want {
+		t.Errorf("HTTPSURL = %q, want %q", got, want)
+	}
+	if got, want := SSHURL(s), "git@github.com:mariusae/env.git"; got != want {
+		t.Errorf("SSHURL = %q, want %q", got, want)
 	}
 	other, err := spec.Parse("git.example.com/m/c:etc")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := DefaultURL(other), "git@git.example.com:m/c.git"; got != want {
-		t.Errorf("DefaultURL = %q, want %q", got, want)
+	if got, want := SSHURL(other), "git@git.example.com:m/c.git"; got != want {
+		t.Errorf("SSHURL = %q, want %q", got, want)
 	}
 }

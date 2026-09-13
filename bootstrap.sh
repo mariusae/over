@@ -21,8 +21,10 @@
 #	over        -> everything    commits in your own repositories
 #
 # Getting over needs no credentials at all: the module proxy serves it over
-# HTTPS, and its versions are immutable. Only your layers need a key, and
-# only to push.
+# HTTPS, and its versions are immutable. Nor do your layers, until one of
+# them is private or you push to it -- at which point over sends you to the
+# host to authorize it. So this script never needs a key, and neither does
+# the machine it runs on.
 #
 set -eu
 
@@ -304,36 +306,23 @@ THUNK
 	chmod 755 "$1"
 }
 
-# check_layer_access looks at whether the host the layers live on will
-# answer, before over gets as far as asking git and git gets as far as
-# asking for a password nobody can type. over reaches its repositories over
-# SSH by default, and a freshly imaged machine has no key yet.
+# check_layer_access says how the layers will be reached, and nothing more.
 #
-# This only warns. A public layer repository clones fine over HTTPS with no
-# credentials at all, which is exactly what a bootstrap does, so a missing
-# key is not necessarily a problem -- and quietly rewriting how repositories
-# are reached would be worse than letting sync say what went wrong.
+# There used to be a test here, because over reached its repositories over
+# SSH and a freshly imaged machine has no key. It reaches them over HTTPS
+# now: a public layer needs no credential at all, and for anything else
+# over sends you to the host to authorize it -- at a moment it chooses,
+# before it writes a thing. So there is nothing to check and nothing to
+# warn about; a sync that needs permission will say so itself.
+#
+# A machine that does have a key can still use it:
+#
+#	over host github.com ssh
 check_layer_access() {
 	case ${OVER_URL:-} in
-	'') host=github.com ;; # over's default, which is SSH
-	https://* | http://* | file://*) return 0 ;;
-	*) host=${OVER_URL#*@}; host=${host%%[:/]*} ;;
+	'') say "layers: reached over https; over will ask for permission if it needs any" ;;
+	*) say "layers: reached as \$OVER_URL says" ;;
 	esac
-	if ! have ssh; then
-		say "ssh: not installed, so only layers reachable another way will sync"
-		return 0
-	fi
-	rc=0
-	ssh -T -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-		"git@$host" >/dev/null 2>&1 || rc=$?
-	if [ "$rc" = 255 ]; then
-		say "ssh: $host will not authenticate, so a private layer cannot be reached."
-		say "     Add a key there, or for public layers reach them over HTTPS:"
-		say "       OVER_URL='https://%[1]s/%[2]s/%[3]s.git'"
-		say "     Syncing anyway, since that may be all you need."
-		return 0
-	fi
-	say "ssh: $host answers"
 }
 
 # --- the plan -----------------------------------------------------------
@@ -397,6 +386,10 @@ main() {
 
 	# The first sync on a fresh machine has nothing to publish, so it is
 	# a pull in everything but name. over has no flag to say so yet.
+	#
+	# If a layer turns out to be private, over stops here and sends you
+	# to the host; it asks before it writes anything, so there is no
+	# half-done state to worry about either way.
 	step "over: syncing"
 	"$STAGE/over" sync >&2
 

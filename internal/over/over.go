@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mariusae/over/internal/auth"
 	"github.com/mariusae/over/internal/config"
 	"github.com/mariusae/over/internal/gitrepo"
 	"github.com/mariusae/over/internal/pathspec"
@@ -29,6 +30,10 @@ type Over struct {
 	cache string
 	url   func(spec.Spec) string
 
+	prompt func(auth.Prompt) error
+	exe    string
+	store  *auth.Store
+
 	repos map[string]*gitrepo.Repo // by repository spec
 }
 
@@ -41,9 +46,23 @@ type Options struct {
 	// Cache is the directory repository checkouts are kept in.
 	Cache string
 
-	// URL returns the git URL of a repository. It defaults to
-	// [DefaultURL], which is SSH on the spec's host.
+	// URL returns the git URL of a repository, overriding the
+	// transport the configuration asks for. It is how $OVER_URL
+	// reaches in; a nil URL leaves the choice to the configuration.
 	URL func(spec.Spec) string
+
+	// Prompt shows the user what they have to do to authorize over at
+	// a host, and returns once it has been shown; over waits for the
+	// host to say it was done. A nil Prompt means over cannot ask, and
+	// a command that needs a credential it has not got fails with the
+	// command to run rather than hanging on a person who may not be
+	// there.
+	Prompt func(auth.Prompt) error
+
+	// Executable is the path to over's own binary, which git is
+	// pointed at as a credential helper. It defaults to
+	// os.Executable.
+	Executable string
 }
 
 // ErrNoLayers is returned by commands that need a configured layer and
@@ -58,15 +77,15 @@ func Open(opts Options) (*Over, error) {
 	if opts.Cache == "" {
 		return nil, fmt.Errorf("no over cache directory")
 	}
-	if opts.URL == nil {
-		opts.URL = DefaultURL
-	}
 	o := &Over{
-		home:  opts.Home,
-		cache: opts.Cache,
-		url:   opts.URL,
-		repos: map[string]*gitrepo.Repo{},
+		home:   opts.Home,
+		cache:  opts.Cache,
+		url:    opts.URL,
+		prompt: opts.Prompt,
+		exe:    opts.Executable,
+		repos:  map[string]*gitrepo.Repo{},
 	}
+	o.store = auth.NewStore(filepath.Join(opts.Home, "auth"))
 	cfg, err := config.Load(o.ConfigPath())
 	if err != nil {
 		return nil, err
@@ -81,13 +100,32 @@ func Open(opts Options) (*Over, error) {
 	return o, nil
 }
 
-// DefaultURL returns the SSH git URL of a repository. SSH is the
-// default because it needs nothing over cannot supply: the user's agent
-// or key answers for it, where HTTPS wants a credential helper and,
-// failing that, a password over has no way to ask for. $OVER_URL
-// overrides it.
-func DefaultURL(s spec.Spec) string {
+// HTTPSURL returns the HTTPS git URL of a repository. This is over's
+// default transport: reading a public repository over it needs no
+// credential at all, and the credential anything else needs is one over
+// can go and get, by sending the user to the host to authorize it.
+func HTTPSURL(s spec.Spec) string {
+	return fmt.Sprintf("https://%s/%s/%s.git", s.Host, s.Owner, s.Repo)
+}
+
+// SSHURL returns the SSH git URL of a repository, which is what a
+// machine with a key already on it may prefer:
+//
+//	over host github.com ssh
+func SSHURL(s spec.Spec) string {
 	return fmt.Sprintf("git@%s:%s/%s.git", s.Host, s.Owner, s.Repo)
+}
+
+// URL returns the git URL over will use for a repository: the override
+// $OVER_URL installs, or the transport the configuration asks for.
+func (o *Over) URL(s spec.Spec) string {
+	if o.url != nil {
+		return o.url(s)
+	}
+	if o.Config.Transport(s.Host) == config.TransportSSH {
+		return SSHURL(s)
+	}
+	return HTTPSURL(s)
 }
 
 // Home returns the configuration directory.
@@ -110,7 +148,11 @@ func (o *Over) Repo(ctx context.Context, s spec.Spec) (*gitrepo.Repo, error) {
 	if r, ok := o.repos[key]; ok {
 		return r, nil
 	}
-	r, err := gitrepo.Open(ctx, o.repoDir(s), o.url(s))
+	cfg, err := o.gitConfig(s)
+	if err != nil {
+		return nil, err
+	}
+	r, err := gitrepo.Open(ctx, o.repoDir(s), o.URL(s), cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -159,16 +201,17 @@ func (o *Over) Fetch(ctx context.Context) ([]Fetched, error) {
 		} else if err != nil {
 			return nil, err
 		}
-		repo, err := o.Repo(ctx, s)
-		if err != nil {
-			return nil, err
-		}
 		if !f.Cloned {
+			repo, err := o.Repo(ctx, s)
+			if err != nil {
+				return nil, err
+			}
 			if f.Before, err = repo.Head(ctx); err != nil {
 				return nil, err
 			}
 		}
-		if err := repo.Update(ctx); err != nil {
+		repo, err := o.UpdateRepo(ctx, s)
+		if err != nil {
 			return nil, err
 		}
 		if f.After, err = repo.Head(ctx); err != nil {
@@ -256,6 +299,9 @@ func (l *Layer) SaveTombstones() error { return l.Tombstones.Save(l.tombPath) }
 // are used as they are, which keeps read-only commands off the network.
 func (o *Over) Layers(ctx context.Context, update bool) ([]*Layer, error) {
 	exclusions, err := o.Exclusions()
+	if err == nil {
+		exclusions = append(exclusions, o.Vetoes()...)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -274,10 +320,11 @@ func (o *Over) Layers(ctx context.Context, update bool) ([]*Layer, error) {
 			return nil, err
 		}
 		if update && !updated[repo.Dir()] {
-			if err := repo.Update(ctx); err != nil {
+			dir := repo.Dir()
+			if repo, err = o.UpdateRepo(ctx, s); err != nil {
 				return nil, err
 			}
-			updated[repo.Dir()] = true
+			updated[dir] = true
 		}
 		rc, err := config.LoadRepo(filepath.Join(repo.Dir(), "config.yaml"))
 		if err != nil {
@@ -513,11 +560,8 @@ func (r *resolver) repo(ctx context.Context, s spec.Spec) (*resolvedRepo, error)
 // repository need not be one of the configured layers': declaring a set
 // is a thing one does to a repository before adding anything from it.
 func (o *Over) OpenRepoConfig(ctx context.Context, s spec.Spec) (*gitrepo.Repo, *config.Repo, []string, error) {
-	repo, err := o.Repo(ctx, s)
+	repo, err := o.UpdateRepo(ctx, s)
 	if err != nil {
-		return nil, nil, nil, err
-	}
-	if err := repo.Update(ctx); err != nil {
 		return nil, nil, nil, err
 	}
 	rc, err := config.LoadRepo(filepath.Join(repo.Dir(), "config.yaml"))

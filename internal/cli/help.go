@@ -67,7 +67,7 @@ Commands:
 
 `)
 	tw := tabwriter.NewWriter(w, 0, 4, 4, ' ', 0)
-	for _, cmd := range sortedCommands() {
+	for _, cmd := range listedCommands() {
 		fmt.Fprintf(tw, "\t%s\t%s\n", cmd.Name, cmd.Short)
 	}
 	tw.Flush()

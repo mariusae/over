@@ -31,6 +31,10 @@ type Env struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
+	// Stdin is the command's input stream. Only the commands that
+	// speak a protocol on it -- "over credential" -- read it.
+	Stdin io.Reader
+
 	// Dir is the directory in which over was invoked, as modified by
 	// the global -C flag. It is always absolute.
 	Dir string
@@ -79,6 +83,11 @@ type Command struct {
 	// Flags registers the command's flags on fs. It may be nil.
 	Flags func(fs *flag.FlagSet)
 
+	// Hidden keeps the command out of the command list. It is for the
+	// ones another program invokes rather than a person: they are
+	// documented by "over help <name>" all the same.
+	Hidden bool
+
 	// Run executes the command with the arguments remaining after flag
 	// parsing. Returning a UsageError prints the command's usage and
 	// exits with status 2; any other error is reported and exits with
@@ -104,7 +113,8 @@ func Register(cmds ...*Command) {
 // lookup returns the command named name, or nil if there is none.
 func lookup(name string) *Command { return commands[name] }
 
-// sortedCommands returns the registered commands ordered by name.
+// sortedCommands returns the registered commands ordered by name,
+// including the hidden ones.
 func sortedCommands() []*Command {
 	cmds := make([]*Command, 0, len(commands))
 	for _, cmd := range commands {
@@ -112,6 +122,18 @@ func sortedCommands() []*Command {
 	}
 	sort.Slice(cmds, func(i, j int) bool { return cmds[i].Name < cmds[j].Name })
 	return cmds
+}
+
+// listedCommands returns the commands the command list shows.
+func listedCommands() []*Command {
+	cmds := sortedCommands()
+	out := cmds[:0]
+	for _, cmd := range cmds {
+		if !cmd.Hidden {
+			out = append(out, cmd)
+		}
+	}
+	return out
 }
 
 // A UsageError indicates that a command was invoked incorrectly. Its
@@ -146,10 +168,16 @@ func Main(ctx context.Context, args []string) int {
 
 // Run is Main with explicit output streams. It is used by tests.
 func Run(ctx context.Context, stdout, stderr io.Writer, args []string) int {
+	return RunWith(ctx, os.Stdin, stdout, stderr, args)
+}
+
+// RunWith is Run with an explicit input stream, for the commands that
+// read one.
+func RunWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 	var (
 		fs  = flag.NewFlagSet("over", flag.ContinueOnError)
 		dir = fs.String("C", "", "run as if over was started in `dir`")
-		env = &Env{Stdout: stdout, Stderr: stderr}
+		env = &Env{Stdout: stdout, Stderr: stderr, Stdin: stdin}
 	)
 	fs.BoolVar(&env.Verbose, "v", false, "log details of what over is doing")
 	fs.SetOutput(stderr)

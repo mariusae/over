@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/mariusae/over/internal/auth"
 
 	"github.com/mariusae/over/internal/over"
 	"github.com/mariusae/over/internal/pathspec"
@@ -24,7 +27,12 @@ func openOver(env *Env) (*over.Over, error) {
 	if err != nil {
 		return nil, err
 	}
-	o, err := over.Open(over.Options{Home: home, Cache: cache, URL: urlFunc()})
+	o, err := over.Open(over.Options{
+		Home:   home,
+		Cache:  cache,
+		URL:    urlFunc(),
+		Prompt: promptFunc(env),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -48,16 +56,18 @@ func dirFromEnv(override, base, fallback string) (string, error) {
 	return pathspec.Resolve(filepath.Join(home, fallback, "over")), nil
 }
 
-// urlFunc returns the function mapping a layer's repository to a git
-// URL. The default is SSH, which works wherever the user's own git
-// does. $OVER_URL overrides it; it is a format string taking the host,
-// owner, and repository as %[1]s, %[2]s, and %[3]s, so HTTPS is
+// urlFunc returns the override mapping a layer's repository to a git
+// URL, or nil to leave the choice to the configuration, which is HTTPS
+// unless a host asks for SSH.
 //
-//	OVER_URL='https://%[1]s/%[2]s/%[3]s.git'
+// $OVER_URL is the override: a format string taking the host, owner, and
+// repository as %[1]s, %[2]s, and %[3]s. It outranks the configuration
+// for every host at once, which is what makes it the way to point over
+// at something that is not a hosting service at all.
 func urlFunc() func(spec.Spec) string {
 	tmpl := os.Getenv("OVER_URL")
 	if tmpl == "" {
-		return over.DefaultURL
+		return nil
 	}
 	return func(s spec.Spec) string {
 		return fmt.Sprintf(tmpl, s.Host, s.Owner, s.Repo)
@@ -220,3 +230,53 @@ working directory unless it is absolute. The element "..." matches any
 number of path elements, so ".config/..." names everything under
 .config; "..." alone names every file over tracks. A path argument with
 no "..." names one file, or, if it is a directory, everything under it.`
+
+// promptFunc returns the function that tells the user how to authorize
+// over at a host, or nil where there is nobody to tell.
+//
+// over will not stop to wait for a person who is not there. A sync in a
+// cron job that turns out to need a credential fails saying which
+// command to run, rather than blocking on a browser nobody will open.
+// $OVER_AUTH=never refuses even where there is a terminal, which is how
+// a script says it would rather have the error.
+func promptFunc(env *Env) func(auth.Prompt) error {
+	switch os.Getenv("OVER_AUTH") {
+	case "never":
+		return nil
+	case "always":
+	default:
+		if !isTerminal(os.Stdin) || !isTerminal(os.Stderr) {
+			return nil
+		}
+	}
+	return func(p auth.Prompt) error {
+		fmt.Fprintf(env.Stderr, "\nover needs your permission to reach the layers.\n\n")
+		fmt.Fprintf(env.Stderr, "    open  %s\n", p.URI)
+		fmt.Fprintf(env.Stderr, "    code  %s\n\n", p.Code)
+		fmt.Fprintf(env.Stderr, "waiting for you to authorize it")
+		if !p.Expires.IsZero() {
+			fmt.Fprintf(env.Stderr, " (the code lasts %s)", time.Until(p.Expires).Round(time.Minute))
+		}
+		fmt.Fprintf(env.Stderr, "...\n")
+		return nil
+	}
+}
+
+// isTerminal reports whether there is a person on the other end of f.
+//
+// A pipe or a file is not a terminal, which the mode says. A character
+// device usually is -- but /dev/null is one too, and /dev/null is
+// precisely what a cron job, a systemd unit, or a test gets handed. So
+// that case is asked about by name, which is the whole of the difference
+// between over waiting for somebody who is coming and over waiting for
+// nobody at all.
+func isTerminal(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if nul, err := os.Stat(os.DevNull); err == nil && os.SameFile(info, nul) {
+		return false
+	}
+	return true
+}

@@ -60,11 +60,8 @@ func (o *Over) Init(ctx context.Context, args []string, root string, origin Orig
 	var created []Created
 	for _, key := range order {
 		specs := byRepo[key]
-		repo, err := o.Repo(ctx, specs[0])
+		repo, err := o.UpdateRepo(ctx, specs[0])
 		if err != nil {
-			return nil, err
-		}
-		if err := repo.Update(ctx); err != nil {
 			return nil, err
 		}
 		path := filepath.Join(repo.Dir(), "config.yaml")
@@ -101,7 +98,7 @@ func (o *Over) Init(ctx context.Context, args []string, root string, origin Orig
 		if _, err := repo.Commit(ctx, Message(subject, lines, origin)); err != nil {
 			return nil, err
 		}
-		if err := repo.Push(ctx); err != nil {
+		if err := o.PushRepo(ctx, specs[0], repo); err != nil {
 			return nil, err
 		}
 	}

@@ -221,11 +221,8 @@ func under(path, dir string) bool {
 // rules stop passing over them. Like a rule, the setting belongs to the
 // layer and is pushed. It reports whether anything changed.
 func (o *Over) SetIncludeBin(ctx context.Context, s spec.Spec, on bool, origin Origin) (bool, error) {
-	repo, err := o.Repo(ctx, s)
+	repo, err := o.UpdateRepo(ctx, s)
 	if err != nil {
-		return false, err
-	}
-	if err := repo.Update(ctx); err != nil {
 		return false, err
 	}
 	path := filepath.Join(repo.Dir(), "config.yaml")
@@ -241,7 +238,7 @@ func (o *Over) SetIncludeBin(ctx context.Context, s spec.Spec, on bool, origin O
 	if _, err := repo.Commit(ctx, Message(subject, nil, origin)); err != nil {
 		return false, err
 	}
-	return true, repo.Push(ctx)
+	return true, o.PushRepo(ctx, s, repo)
 }
 
 // LayerIncludeBin reports whether a layer holds binary files, as its
@@ -272,11 +269,8 @@ func (o *Over) LayerRules(s spec.Spec, kind string) []string {
 // repository and pushed: rules belong to the layer, so changing one
 // changes it for every machine that adds it.
 func (o *Over) Rules(ctx context.Context, s spec.Spec, kind string, patterns []string, remove bool, origin Origin) ([]string, error) {
-	repo, err := o.Repo(ctx, s)
+	repo, err := o.UpdateRepo(ctx, s)
 	if err != nil {
-		return nil, err
-	}
-	if err := repo.Update(ctx); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(repo.Dir(), "config.yaml")
@@ -307,7 +301,7 @@ func (o *Over) Rules(ctx context.Context, s spec.Spec, kind string, patterns []s
 	if _, err := repo.Commit(ctx, Message(subject, lines, origin)); err != nil {
 		return nil, err
 	}
-	if err := repo.Push(ctx); err != nil {
+	if err := o.PushRepo(ctx, s, repo); err != nil {
 		return nil, err
 	}
 	return changed, nil

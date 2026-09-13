@@ -370,6 +370,87 @@ Excluding a path over already tracks does not take the file out of its
 layer. over simply stops looking at it; use `over untrack` to forget it
 as well.
 
+## Authorization
+
+over reaches its repositories over HTTPS, which needs no credential at
+all to read a public one. Anything else -- a private layer, or any push
+-- needs a token, and over goes and gets one by sending you to the host:
+
+	$ over sync
+
+	over needs your permission to reach the layers.
+
+	    open  https://github.com/login/device
+	    code  C1A2-B3D4
+
+	waiting for you to authorize it (the code lasts 15m)...
+	.zshrc to mariusae/config:editors
+
+The code is deliberately not in the link, so that opening a page is not
+on its own enough to authorize anything.
+
+That is the point of doing it this way: a machine with no key on it is
+usable immediately, and what makes it writable is clicking a link rather
+than generating a keypair and installing it somewhere.
+
+**When over asks.** Never in the middle of the work. A fetch that is
+refused has changed nothing, so over authorizes and tries again on the
+spot. A push is different -- it happens after local files have been read
+and commits made -- so over reads the plan, sees which layers are to be
+written, and asks for those before it touches the first file. There is no
+moment at which a sync is half done and waiting for a browser.
+
+**When over does not ask.** Where there is nobody to ask. A cron job or a
+script gets an error naming the command to run, rather than a wait that
+will never end. `OVER_AUTH=never` refuses even where there is a terminal.
+
+	over auth                  authorize over at github.com
+	over auth -status          what over holds, for every host
+	over auth -rm [host]       forget it
+	over auth -token [host]    read a token from standard input
+
+`over auth -token` is for a token you already have. `$OVER_TOKEN`,
+`$GITHUB_TOKEN`, and `$GH_TOKEN` are used if set, in that order, and are
+never written down.
+
+A token is kept under over's home directory, readable by nobody else.
+over refuses to manage that directory as layer content **whatever the
+exclusions say** -- unlike the seeded exclusions, which are yours to
+remove, this one is not an opinion. A credential committed to a layer is
+a credential to revoke, and it would be published to every machine that
+adds the layer.
+
+### Keys, if you have them
+
+A machine with a working SSH key needs none of this, and can say so:
+
+	$ over host
+	github.com  https
+	$ over host github.com ssh
+	github.com  ssh
+
+over then asks for nothing, because the key answers for it. The setting
+is per host and local to the machine -- which transport suits a machine
+is a property of the machine, not of the layers.
+
+over also leaves your own git configuration alone until it has a token of
+its own. Until then, whatever credential helper already answers for the
+host goes on answering, so a machine that worked before works still and
+is never asked to authorize anything.
+
+	$ over auth -status
+	github.com  mariusae  expires in 8h0m0s
+
+### A private repository looks like a missing one
+
+GitHub answers a request for a repository you may not see much the way it
+answers one that does not exist -- saying "forbidden" would confirm it is
+there. So over does not claim the name is wrong:
+
+	$ over add mariusae/env:editors
+	over: github.com: no terminal to authorize on; run 'over auth github.com'
+	  where you can see it, or give over a token with 'over auth -token github.com'
+
 ## Path arguments
 
 Every command that takes paths takes them the same way. A path names
@@ -400,6 +481,8 @@ elements:
 	over rule [-ignore] [-rm] [-includebin] <layer> [pattern...]
 	over set [-rm] <set> [layer...]
 	over exclude [-rm] [path...]
+	over auth [-status] [-rm] [-token] [host]
+	over host [<host> [https|ssh]]
 
 Run `over help <command>` for the details of any of them.
 
@@ -419,9 +502,13 @@ by hand.
 	exclude:
 	    - $HOME/.config/over/...
 	    - $HOME/.cache/over/...
+	hosts:
+	    github.com:
+	        transport: ssh
 
-Beside it, `state/<host>/<owner>/<repo>/<layer>.yaml` records what over
-saw at the last sync: the revision, the time, and the hash of every
+Beside it, `auth/<host>.json` holds what `over auth` obtained, and
+`state/<host>/<owner>/<repo>/<layer>.yaml` records what over saw at the
+last sync: the revision, the time, and the hash of every
 file. The state is what makes conflict detection possible, and it is
 the only thing over consults to decide whether a file is its business.
 
@@ -463,15 +550,19 @@ keyed by name, each a list of members in the order they expand:
 
 	OVER_HOME     over's configuration directory
 	OVER_CACHE    the repository cache directory
+	OVER_AUTH     "never" to refuse to authorize even on a terminal;
+	              "always" to offer to even without one
+	OVER_TOKEN    a credential to use in place of "over auth";
+	              $GITHUB_TOKEN and $GH_TOKEN are read too
 	OVER_URL      a format string for repository URLs, taking the host,
 	              owner, and repository as %[1]s, %[2]s, and %[3]s;
-	              the default is git@%[1]s:%[2]s/%[3]s.git
+	              the default is https://%[1]s/%[2]s/%[3]s.git
 
-over reaches its repositories over SSH, which needs nothing it cannot
-supply: the user's agent or key answers for it. HTTPS wants a credential
-helper, and over has no way to ask for a password. To use it anyway:
+`$OVER_URL` outranks the configured transport for every host at once,
+which is how to point over at something that is not a hosting service at
+all:
 
-	OVER_URL='https://%[1]s/%[2]s/%[3]s.git'
+	OVER_URL='file:///srv/git/%[2]s/%[3]s.git'
 
 A checkout already in the cache is pointed at the current URL the next
 time over opens it, so changing this does not strand what is there.
@@ -499,6 +590,7 @@ no network.
 	internal/config      the client and repository configuration files
 	internal/state       per-layer sync state, the base for comparison
 	internal/gitrepo     the git command line, wrapped
+	internal/auth        credentials: the token store and the device flow
 	internal/spec        layer specifications
 	internal/pathspec    path arguments
 	internal/content     whether a file holds text

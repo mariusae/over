@@ -31,6 +31,47 @@ type Config struct {
 	// seeded with over's own directories; an empty list means no
 	// exclusions at all, which is why the key is always written.
 	Exclude []string `yaml:"exclude"`
+
+	// Hosts configures the hosts the layer repositories live on,
+	// keyed by host name. A host that says nothing gets the defaults.
+	Hosts map[string]Host `yaml:"hosts,omitempty"`
+}
+
+// A Host is the client's configuration for one repository host.
+type Host struct {
+	// Transport is how over reaches the host: "https", the default, or
+	// "ssh".
+	//
+	// HTTPS is the default because reading a public repository over it
+	// needs no credential at all, and because the credential it does
+	// need for anything else is one over can obtain by sending the
+	// user to the host -- where a key is something over can only hope
+	// is already there. SSH is for the machine that has one and would
+	// rather use it.
+	Transport string `yaml:"transport,omitempty"`
+}
+
+// Transports are the values [Host.Transport] may take.
+const (
+	TransportHTTPS = "https"
+	TransportSSH   = "ssh"
+)
+
+// Transport returns how over should reach a host.
+func (c *Config) Transport(host string) string {
+	if h, ok := c.Hosts[host]; ok && h.Transport != "" {
+		return h.Transport
+	}
+	return TransportHTTPS
+}
+
+// CheckTransport rejects a transport over does not know.
+func CheckTransport(t string) error {
+	switch t {
+	case TransportHTTPS, TransportSSH:
+		return nil
+	}
+	return fmt.Errorf("%q is not a transport; use %q or %q", t, TransportHTTPS, TransportSSH)
 }
 
 // An Entry is one configured layer.

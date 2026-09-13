@@ -47,7 +47,7 @@ func TestEmptyRepository(t *testing.T) {
 	url := newRemote(t)
 	dir := filepath.Join(t.TempDir(), "checkout")
 
-	r, err := Open(ctx, dir, url)
+	r, err := Open(ctx, dir, url, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestUpdateFastForwards(t *testing.T) {
 	url := newRemote(t)
 	first := seed(t, ctx, url, "one\n")
 
-	second, err := Open(ctx, filepath.Join(t.TempDir(), "b"), url)
+	second, err := Open(ctx, filepath.Join(t.TempDir(), "b"), url, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestUpdatePushesPendingCommits(t *testing.T) {
 	if unpushed, err := r.Unpushed(ctx); err != nil || unpushed {
 		t.Errorf("Unpushed after Update = %v, %v", unpushed, err)
 	}
-	other, err := Open(ctx, filepath.Join(t.TempDir(), "c"), url)
+	other, err := Open(ctx, filepath.Join(t.TempDir(), "c"), url, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestUpdateReportsDivergence(t *testing.T) {
 	ctx := context.Background()
 	url := newRemote(t)
 	first := seed(t, ctx, url, "one\n")
-	second, err := Open(ctx, filepath.Join(t.TempDir(), "b"), url)
+	second, err := Open(ctx, filepath.Join(t.TempDir(), "b"), url, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestUpdateReportsDivergence(t *testing.T) {
 // seed returns a checkout of url with one commit in it.
 func seed(t *testing.T, ctx context.Context, url, content string) *Repo {
 	t.Helper()
-	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), url)
+	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), url, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func seed(t *testing.T, ctx context.Context, url, content string) *Repo {
 func TestLastCommit(t *testing.T) {
 	ctx := context.Background()
 	url := newRemote(t)
-	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), url)
+	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), url, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestLastCommit(t *testing.T) {
 // TestLog checks the per-file history "over log" reports from.
 func TestLog(t *testing.T) {
 	ctx := context.Background()
-	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), newRemote(t))
+	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), newRemote(t), Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestLog(t *testing.T) {
 // is what "over restore" is built on.
 func TestShow(t *testing.T) {
 	ctx := context.Background()
-	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), newRemote(t))
+	r, err := Open(ctx, filepath.Join(t.TempDir(), "a"), newRemote(t), Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,14 +352,14 @@ func TestOpenFollowsTheURL(t *testing.T) {
 	ctx := context.Background()
 	url := newRemote(t)
 	dir := filepath.Join(t.TempDir(), "checkout")
-	if _, err := Open(ctx, dir, url); err != nil {
+	if _, err := Open(ctx, dir, url, Config{}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Reopening at a different URL moves the remote rather than
 	// leaving the checkout pointed at the old one.
 	moved := newRemote(t)
-	r, err := Open(ctx, dir, moved)
+	r, err := Open(ctx, dir, moved, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestOpenFollowsTheURL(t *testing.T) {
 	if _, err := r.git(ctx, "remote", "remove", "origin"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(ctx, dir, moved); err != nil {
+	if _, err := Open(ctx, dir, moved, Config{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := r.git(ctx, "remote", "get-url", "origin"); err != nil || got != moved {

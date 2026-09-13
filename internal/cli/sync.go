@@ -63,7 +63,17 @@ func runSync(ctx context.Context, env *Env, args []string) error {
 	}
 	counts := over.Count(s.Changes)
 	if !syncFlagN {
-		if err := over.Sync(ctx, s.Layers, s.Changes, over.LocalOrigin(Version())); err != nil {
+		// Everything this sync means to publish, authorized before a
+		// single file is touched. A push happens after local files
+		// have been read and commits made, which is the wrong moment
+		// to stop and wait for somebody to open a browser -- but the
+		// plan already says which layers are to be written, so the
+		// waiting can happen here instead, where nothing is half
+		// done.
+		if err := s.Over.Authorize(ctx, over.WriteNeeds(s.Changes)...); err != nil {
+			return err
+		}
+		if err := s.Over.Sync(ctx, s.Layers, s.Changes, over.LocalOrigin(Version())); err != nil {
 			// Save whatever was applied before the failure, so that
 			// over's state still describes the file system.
 			if serr := s.Save(); serr != nil {

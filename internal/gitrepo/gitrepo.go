@@ -22,12 +22,34 @@ import (
 type Repo struct {
 	dir string
 	url string
+	cfg Config
+}
+
+// Config settles how git is invoked for a repository.
+type Config struct {
+	// Helper is the credential helper git should consult, in the form
+	// git's credential.helper takes -- a "!" prefix for a command to
+	// run. An empty Helper leaves git's own configuration alone.
+	Helper string
+}
+
+// Args returns the -c flags that precede every git invocation.
+func (c Config) Args() []string {
+	if c.Helper == "" {
+		return nil
+	}
+	// The empty value first clears whatever helpers the user's own git
+	// configuration installs. over's credentials have to be over's: a
+	// stale entry in somebody else's helper would answer first, fail,
+	// and then go on answering first on the retry -- so a host over
+	// authenticates to is a host over answers for alone.
+	return []string{"-c", "credential.helper=", "-c", "credential.helper=" + c.Helper}
 }
 
 // Open returns the checkout of url at dir, cloning it if it is not
 // already there.
-func Open(ctx context.Context, dir, url string) (*Repo, error) {
-	r := &Repo{dir: dir, url: url}
+func Open(ctx context.Context, dir, url string, cfg Config) (*Repo, error) {
+	r := &Repo{dir: dir, url: url, cfg: cfg}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
 		return r, r.setOrigin(ctx)
 	} else if !os.IsNotExist(err) {
@@ -44,7 +66,7 @@ func Open(ctx context.Context, dir, url string) (*Repo, error) {
 	}
 	defer os.RemoveAll(tmp)
 	into := filepath.Join(tmp, "repo")
-	if _, err := run(ctx, "", "clone", "--quiet", url, into); err != nil {
+	if _, err := run(ctx, "", cfg, "clone", "--quiet", url, into); err != nil {
 		return nil, fmt.Errorf("clone %s: %w", url, err)
 	}
 	if err := os.Rename(into, dir); err != nil {
@@ -334,7 +356,7 @@ func (r *Repo) Show(ctx context.Context, rev, path string) (data []byte, exec bo
 	if kind != "blob" {
 		return nil, false, fmt.Errorf("%s at %s: not a regular file", path, rev)
 	}
-	data, err = runRaw(ctx, r.dir, "show", rev+":"+path)
+	data, err = runRaw(ctx, r.dir, r.cfg, "show", rev+":"+path)
 	if err != nil {
 		return nil, false, err
 	}
@@ -343,32 +365,113 @@ func (r *Repo) Show(ctx context.Context, rev, path string) (data []byte, exec bo
 
 // git runs a git command in the checkout.
 func (r *Repo) git(ctx context.Context, args ...string) (string, error) {
-	return run(ctx, r.dir, args...)
+	return run(ctx, r.dir, r.cfg, args...)
 }
 
 // run runs a git command in dir, returning its trimmed standard output.
-func run(ctx context.Context, dir string, args ...string) (string, error) {
-	out, err := runRaw(ctx, dir, args...)
+func run(ctx context.Context, dir string, cfg Config, args ...string) (string, error) {
+	out, err := runRaw(ctx, dir, cfg, args...)
 	return strings.TrimSpace(string(out)), err
 }
 
 // runRaw runs a git command in dir, returning its standard output
 // unchanged. File contents have to come back this way: trimming them
 // would corrupt them.
-func runRaw(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+func runRaw(ctx context.Context, dir string, cfg Config, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", append(cfg.Args(), args...)...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	// Keep git from stopping to ask for credentials; over is not
-	// interactive.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	// git never stops to ask for anything. A credential it does not
+	// have is over's problem to solve, at a moment over chooses, and
+	// not a prompt from inside a subprocess halfway through a sync.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=")
 	if err := cmd.Run(); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+		msg := strings.TrimSpace(stderr.String())
+		if kind := classify(msg); kind != nil {
+			return nil, &RemoteError{Kind: kind, Op: args[0], Msg: msg, err: err}
+		}
+		if msg != "" {
 			return nil, fmt.Errorf("git %s: %s: %w", args[0], msg, err)
 		}
 		return nil, fmt.Errorf("git %s: %w", args[0], err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// ErrAuth reports that the remote refused for want of a credential over
+// does not have, or will not accept the one it offered.
+var ErrAuth = errors.New("authentication required")
+
+// ErrNotFound reports that the remote says there is no such repository.
+//
+// On GitHub this is also the answer for a private repository the caller
+// is not allowed to see, because saying "forbidden" would confirm that
+// it exists. So a not-found is not proof the name is wrong, and over
+// must not claim it is.
+var ErrNotFound = errors.New("no such repository")
+
+// A RemoteError is a git failure the remote is answerable for, tagged
+// with what can be done about it.
+type RemoteError struct {
+	// Kind is [ErrAuth] or [ErrNotFound].
+	Kind error
+
+	// Op is the git subcommand that failed.
+	Op string
+
+	// Msg is git's own complaint, which says more than over can.
+	Msg string
+
+	err error
+}
+
+func (e *RemoteError) Error() string { return fmt.Sprintf("git %s: %s", e.Op, e.Msg) }
+
+// Unwrap reports both the kind and the underlying exit error, so that
+// errors.Is finds either.
+func (e *RemoteError) Unwrap() []error { return []error{e.Kind, e.err} }
+
+// authMessages are what git and the hosts say when a credential is the
+// problem. Matching text is unlovely, but git reports every remote
+// failure as exit status 128 and there is nothing else to go on.
+var authMessages = []string{
+	"could not read username",      // GIT_TERMINAL_PROMPT=0 with no helper
+	"could not read password",      //
+	"authentication failed",        // a credential that was refused
+	"invalid username or password", //
+	"terminal prompts disabled",    //
+	"error: 401",                   // smart HTTP, unauthorized
+	"error: 403",                   // smart HTTP, forbidden
+	"write access to repository not granted",
+	"permission denied (publickey)", // SSH with no usable key
+	"permission to ",                // "Permission to x/y.git denied to z"
+	"authentication is required",
+}
+
+// notFoundMessages are what they say when the repository is not there,
+// or is not there as far as this caller is concerned.
+var notFoundMessages = []string{
+	"repository not found", // GitHub, over both transports
+	"' not found",          // git's own, which quotes the URL first
+	"error: 404",
+	"does not appear to be a git repository",
+}
+
+// classify reports what kind of failure git's complaint describes, or
+// nil if it is nothing over can act on.
+func classify(msg string) error {
+	m := strings.ToLower(msg)
+	for _, s := range authMessages {
+		if strings.Contains(m, s) {
+			return ErrAuth
+		}
+	}
+	for _, s := range notFoundMessages {
+		if strings.Contains(m, s) {
+			return ErrNotFound
+		}
+	}
+	return nil
 }

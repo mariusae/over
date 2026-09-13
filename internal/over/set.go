@@ -73,7 +73,7 @@ func (o *Over) EditSet(ctx context.Context, ref spec.Ref, members []string, remo
 	if _, err := repo.Commit(ctx, Message(subject, lines, origin)); err != nil {
 		return nil, err
 	}
-	if err := repo.Push(ctx); err != nil {
+	if err := o.PushRepo(ctx, ref.Spec, repo); err != nil {
 		return nil, err
 	}
 	return changed, nil
@@ -99,7 +99,7 @@ func (o *Over) DeleteSet(ctx context.Context, ref spec.Ref, origin Origin) (bool
 	if _, err := repo.Commit(ctx, Message(subject, nil, origin)); err != nil {
 		return false, err
 	}
-	return true, repo.Push(ctx)
+	return true, o.PushRepo(ctx, ref.Spec, repo)
 }
 
 // checkMembers rejects a member that cannot resolve, before it is

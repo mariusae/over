@@ -10,6 +10,7 @@ import (
 
 	"github.com/mariusae/over/internal/config"
 	"github.com/mariusae/over/internal/gitrepo"
+	"github.com/mariusae/over/internal/spec"
 	"github.com/mariusae/over/internal/state"
 )
 
@@ -21,7 +22,7 @@ import (
 // way through leaves the state describing what actually happened.
 // Pushes are gathered into one commit per repository, and recorded only
 // once that commit has been pushed.
-func Sync(ctx context.Context, layers []*Layer, changes []Change, origin Origin) error {
+func (o *Over) Sync(ctx context.Context, layers []*Layer, changes []Change, origin Origin) error {
 	for i := range changes {
 		c := &changes[i]
 		switch c.Status {
@@ -37,7 +38,7 @@ func Sync(ctx context.Context, layers []*Layer, changes []Change, origin Origin)
 			record(c)
 		}
 	}
-	if err := push(ctx, changes, origin); err != nil {
+	if err := o.push(ctx, changes, origin); err != nil {
 		return err
 	}
 	now := time.Now().UTC().Truncate(time.Second)
@@ -77,10 +78,11 @@ func pullDelete(c *Change) error {
 
 // push stages every outgoing change in its layer's checkout, then
 // commits and pushes each repository once.
-func push(ctx context.Context, changes []Change, origin Origin) error {
+func (o *Over) push(ctx context.Context, changes []Change, origin Origin) error {
 	var (
 		repos   []*gitrepo.Repo
 		byRepo  = map[*gitrepo.Repo][]*Change{}
+		specOf  = map[*gitrepo.Repo]spec.Spec{}
 		layers  []*Layer
 		touched = map[*Layer]bool{}
 	)
@@ -94,6 +96,7 @@ func push(ctx context.Context, changes []Change, origin Origin) error {
 		}
 		if _, ok := byRepo[c.Layer.Repo]; !ok {
 			repos = append(repos, c.Layer.Repo)
+			specOf[c.Layer.Repo] = c.Layer.Spec
 		}
 		byRepo[c.Layer.Repo] = append(byRepo[c.Layer.Repo], c)
 		if !touched[c.Layer] {
@@ -111,7 +114,7 @@ func push(ctx context.Context, changes []Change, origin Origin) error {
 		if _, err := repo.Commit(ctx, CommitMessage(cs, origin)); err != nil {
 			return err
 		}
-		if err := repo.Push(ctx); err != nil {
+		if err := o.PushRepo(ctx, specOf[repo], repo); err != nil {
 			return err
 		}
 		for _, c := range cs {
